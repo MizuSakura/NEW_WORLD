@@ -9,11 +9,13 @@ SCRIPTS.PY
 # Data
 /data/raw/
 /data/processed/
+my_project\data/
 
 .gitignore
 
 # model artifacts
 *.pth
 *.pkl
+*.png
 experiments/config/predict_model/
 .vscode/
