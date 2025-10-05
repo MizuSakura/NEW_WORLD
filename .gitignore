@@ -1,0 +1,19 @@
+SETUP_PROJECT/
+# Python
+__pycache__/
+*.pyc
+.env
+.venv/
+SCRIPTS.PY
+
+# Data
+/data/raw/
+/data/processed/
+
+.gitignore
+
+# model artifacts
+*.pth
+*.pkl
+experiments/config/predict_model/
+.vscode/
