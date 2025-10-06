@@ -12,7 +12,7 @@ SCRIPTS.PY
 my_project\data/
 
 .gitignore
-
+.gitattributes
 # model artifacts
 *.pth
 *.pkl
