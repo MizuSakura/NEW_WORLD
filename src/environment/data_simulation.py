@@ -6,7 +6,7 @@ import time
 from src.utils.logger import Logger
 from src.environment.RC_Tank_env import RC_Tank_Env
 from src.environment.signal_generator import SignalGenerator
-
+import argparse
 # -----------------------------
 # Run simulation
 # -----------------------------
@@ -77,29 +77,55 @@ def run_simulation(env, signal_generator, signal_type='pwm', signal_params=None,
 # Example run
 # -----------------------------
 if __name__ == "__main__":
-    TIME_SIM = 30
-    DT = 0.01
-    DT_LOG = 0.1
-    SETPOINT = 5.0
-    MAX_VOLT = 24
-    MAX_CURR = 3
-    MODE = 'voltage'  # 'voltage' or 'current'
-    env = RC_Tank_Env(control_mode=MODE, max_action_volt=MAX_VOLT,level_max=MAX_VOLT,
-                      max_action_current=MAX_CURR, setpoint_level=SETPOINT, dt=DT)
-    sg = SignalGenerator(t_end=TIME_SIM, dt=DT)
+    # 1. สร้าง "เครื่องมืออ่านคำสั่ง"
+    parser = argparse.ArgumentParser(description="Run RC Tank Simulation")
+
+    # 2. กำหนด "ช่องรับคำสั่ง" สำหรับ Environment
+    parser.add_argument('--R', type=float, default=1.5, help='Resistance value')
+    parser.add_argument('--C', type=float, default=2.0, help='Capacitance value')
+    parser.add_argument('--dt', type=float, default=0.01, help='Simulation time step')
+    parser.add_argument('--control_mode', type=str, default='voltage', choices=['voltage', 'current'], help='Control mode')
+    parser.add_argument('--setpoint_level', type=float, default=5.0, help='Target water level')
+    parser.add_argument('--level_max', type=float, default=10.0, help='Maximum water level')
+    parser.add_argument('--max_action_volt', type=float, default=24.0, help='Max voltage action')
+    parser.add_argument('--max_action_current', type=float, default=5.0, help='Max current action')
+
+    # 3. กำหนด "ช่องรับคำสั่ง" สำหรับ Signal
+    parser.add_argument('--time_sim', type=float, default=30.0, help='Total simulation time')
+    parser.add_argument('--signal_type', type=str, default='pwm', choices=['pwm', 'step', 'ramp', 'impulse'], help='Type of signal')
+    parser.add_argument('--amplitude', type=float, default=12.0, help='Signal amplitude')
+    parser.add_argument('--duty', type=float, default=0.5, help='PWM duty cycle')
+    parser.add_argument('--freq', type=float, default=1.0, help='PWM frequency')
+    
+    # 4. "อ่านคำสั่ง" ที่ส่งเข้ามา
+    args = parser.parse_args()
+
+    # 5. ใช้ "คำสั่งที่อ่านได้" ในการสร้าง Env และ Signal
+    env = RC_Tank_Env(R=args.R, C=args.C, dt=args.dt, control_mode=args.control_mode, 
+                      setpoint_level=args.setpoint_level, level_max=args.level_max,
+                      max_action_volt=args.max_action_volt, max_action_current=args.max_action_current)
+    
+    sg = SignalGenerator(t_end=args.time_sim, dt=args.dt)
+
+    # signal_params = {
+    #     'amplitude': args.amplitude,
+    #     'duty': args.duty,
+    #     'freq': args.freq
+    # }     
+
+    signal_params = {'amplitude': args.amplitude} 
+    if args.signal_type == 'pwm':
+        signal_params['duty'] = args.duty
+        signal_params['freq'] = args.freq
 
     folder_csv = Path("./data/raw")
     folder_plot = Path("./data/picture")
+    
+    # 6. รัน Simulation ด้วยค่าที่กำหนด!
+    run_simulation(env, sg, signal_type=args.signal_type, signal_params=signal_params,
+                   log_dt=0.1, folder_save_csv=folder_csv,
+                   folder_save_plot=folder_plot, file_prefix=f"sim_{args.signal_type}")
 
-    # ทดลองรันหลาย duty cycle และหลาย freq ของ PWM
-    duty_list = np.linspace(0.1, 1, 10)
-    freq_list = np.linspace(0.1, 2.0, 5)  # ตัวอย่างช่วง freq 0.1 ถึง 2.0 Hz
-    for duty in duty_list:
-        for freq in freq_list:
-            run_simulation(
-                env, sg, signal_type='pwm',
-                signal_params={'amplitude': 1, 'freq': freq, 'duty': duty},
-                log_dt=DT_LOG, folder_save_csv=folder_csv,
-                folder_save_plot=folder_plot,
-                file_prefix=f"pwm_duty_{duty:.2f}_freq_{freq:.2f}"
-            )
+    print(f"Simulation with {args.signal_type} completed successfully!")
+
+
