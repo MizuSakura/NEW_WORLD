@@ -1,319 +1,223 @@
-import joblib
-import yaml
-import zipfile
+# src/utils/scaling_zip_loader.py
+"""
+ScalingZipLoader
+================
+
+Utility class for loading trained scalers and metadata from a ZIP archive.
+
+This tool restores serialized `MinMaxScaler` or `StandardScaler` instances,
+along with dataset metadata (feature names, data ranges, etc.)
+produced by the `GlobalScalingReference` pipeline.
+
+Main Features
+-------------
+- Load `input_scaler.pkl`, `output_scaler.pkl`, and `metadata.yaml` directly from a ZIP file.
+- Perform consistent scaling and inverse scaling for inference.
+- Quickly inspect stored metadata for debugging or validation.
+
+Example
+-------
+>>> from utils.scaling_zip_loader import ScalingZipLoader
+>>> loader = ScalingZipLoader("config/RC_Tank_Env_scalers.zip")
+>>> loader.summary()
+>>> X_scaled = loader.transform_input([[12.0, 15.5]])
+>>> y_original = loader.inverse_output([[0.8]])
+>>> print(X_scaled, y_original)
+"""
+
 import io
+import yaml
+import joblib
+import zipfile
 import warnings
 import numpy as np
 from pathlib import Path
-from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import MinMaxScaler, StandardScaler
 
 
 class ScalingZipLoader:
     """
-    A utility class for loading input/output scalers and metadata from a ZIP file.
+    Load input/output scalers and metadata from a ZIP file.
 
-    This class is designed to:
-    - Load serialized `MinMaxScaler` objects (both input and output)
-    - Optionally load metadata from a YAML file inside the ZIP archive
-    - Provide methods to transform and inverse-transform data conveniently
+    The ZIP archive should contain:
+    - `input_scaler.pkl`  : Input data scaler
+    - `output_scaler.pkl` : Output data scaler
+    - `metadata.yaml`     : Metadata (feature info, min/max range, etc.)
 
-    Typical use cases include:
-    - Restoring normalization parameters for ML model inference
-    - Reusing pre-fitted scalers for consistent preprocessing pipelines
+    Parameters
+    ----------
+    zip_path : str or Path
+        Path to the ZIP file containing scalers and metadata.
 
     Attributes
     ----------
-    zip_path : Path
-        Path to the ZIP file.
-    scaler_in : MinMaxScaler | None
-        Scaler object for input data normalization.
-    scaler_out : MinMaxScaler | None
-        Scaler object for output (target) normalization.
-    metadata : dict | None
-        Optional YAML metadata dictionary describing scaling ranges or context.
+    scaler_in : sklearn.preprocessing.BaseEstimator
+        Loaded input scaler.
+    scaler_out : sklearn.preprocessing.BaseEstimator
+        Loaded output scaler.
+    metadata : dict
+        Metadata dictionary loaded from YAML.
 
-    Examples
-    --------
-    >>> from pathlib import Path
-    >>> import numpy as np
-    >>> loader = ScalingZipLoader(Path("RC_Tank_Env_Training2_scalers.zip"))
-    >>> loader.is_loaded()
-    True
-    >>> X = np.array([[0.5], [1.5]])
-    >>> X_scaled = loader.transform_input(X)
-    >>> print(X_scaled)
-    [[-0.5]
-     [ 0.5]]
-    >>> y_inverse = loader.inverse_output(X_scaled)
-    >>> print(y_inverse)
-    [[2.5]
-     [7.5]]
+    Example
+    -------
+    >>> loader = ScalingZipLoader("config/RC_Tank_Env_scalers.zip")
     >>> loader.summary()
-    📦 ScalingZipLoader Summary:
-      input_feature_range: (-1, 1)
-      output_feature_range: (0, 10)
-      description: Test scaler zip file
+    >>> loader.transform_input([[10, 20]])
+    array([[0.25, 0.70]])
     """
 
-    def __init__(self, zip_path):
-        """
-        Initialize the ScalingZipLoader and automatically load its contents.
-
-        Parameters
-        ----------
-        zip_path : str or Path
-            Path to the ZIP file containing the scalers and metadata.
-
-        Examples
-        --------
-        >>> loader = ScalingZipLoader("path/to/scaler_archive.zip")
-        >>> print(loader.is_loaded())
-        True
-        """
+    def __init__(self, zip_path: str | Path):
         self.zip_path = Path(zip_path)
         self.scaler_in = None
         self.scaler_out = None
         self.metadata = None
-        self._load_from_zip()  # Automatically loads all components upon initialization
 
-    def _get_file_from_zip(self, zipf, name_keyword):
-        """
-        Find and read a file from the ZIP archive whose name contains the given keyword.
+        if not self.zip_path.exists():
+            raise FileNotFoundError(f"❌ ZIP file not found at: {self.zip_path}")
 
-        Parameters
-        ----------
-        zipf : zipfile.ZipFile
-            An opened ZIP file object.
-        name_keyword : str
-            Keyword used to identify the target file within the archive.
+        self._load_from_zip()
+        print(f"✅ Successfully loaded artifacts from: {self.zip_path.name}")
 
-        Returns
-        -------
-        bytes
-            File content in bytes.
+    # ---------------------------------------------------------------------
+    # Internal helper methods
+    # ---------------------------------------------------------------------
+    def _load_from_zip(self):
+        """Load all objects (scalers and metadata) from ZIP archive."""
+        with zipfile.ZipFile(self.zip_path, "r") as zipf:
+            self.scaler_in = self._load_joblib_from_zip(zipf, "input_scaler.pkl")
+            self.scaler_out = self._load_joblib_from_zip(zipf, "output_scaler.pkl")
+            self.metadata = self._load_yaml_from_zip(zipf, "metadata.yaml")
 
-        Raises
-        ------
-        FileNotFoundError
-            If no file matching the keyword is found.
+    def _load_joblib_from_zip(self, zipf, filename):
+        """Helper to load joblib-serialized objects from ZIP."""
+        try:
+            with zipf.open(filename) as f:
+                return joblib.load(io.BytesIO(f.read()))
+        except KeyError:
+            raise FileNotFoundError(f"❌ '{filename}' not found in ZIP.")
 
-        Notes
-        -----
-        The method scans through the ZIP file entries and returns the first match found.
-
-        Examples
-        --------
-        >>> with zipfile.ZipFile("archive.zip", "r") as zipf:
-        ...     data = ScalingZipLoader._get_file_from_zip(self=None, zipf=zipf, name_keyword="input_scaler")
-        """
-        for info in zipf.infolist():
-            # Match file name by substring keyword
-            if name_keyword in info.filename:
-                with zipf.open(info) as f:
-                    return f.read()
-        raise FileNotFoundError(f"❌ File containing '{name_keyword}' not found in ZIP")
-
-    def _safe_load_yaml(self, zipf, filename="metadata.yaml"):
-        """
-        Safely load the YAML metadata file from the ZIP archive.
-
-        Parameters
-        ----------
-        zipf : zipfile.ZipFile
-            Opened ZIP file object.
-        filename : str, default="metadata.yaml"
-            Name of the YAML file expected inside the ZIP.
-
-        Returns
-        -------
-        dict | None
-            Parsed metadata dictionary if found, otherwise None.
-
-        Examples
-        --------
-        >>> with zipfile.ZipFile("archive.zip", "r") as zipf:
-        ...     meta = ScalingZipLoader._safe_load_yaml(self=None, zipf=zipf)
-        """
+    def _load_yaml_from_zip(self, zipf, filename):
+        """Helper to load YAML files safely."""
         try:
             with zipf.open(filename) as f:
                 return yaml.safe_load(f)
         except KeyError:
-            # Warn the user if metadata is missing (not critical)
-            warnings.warn(f"⚠️ {filename} not found in ZIP — metadata will be None", UserWarning)
+            warnings.warn(f"⚠️ '{filename}' not found in ZIP.", UserWarning)
             return None
 
-    def _load_from_zip(self):
+    # ---------------------------------------------------------------------
+    # Public API
+    # ---------------------------------------------------------------------
+    def summary(self):
         """
-        Load the input/output scalers and metadata from the ZIP file.
+        Display formatted metadata information.
 
-        Raises
-        ------
-        FileNotFoundError
-            If the specified ZIP file path does not exist.
-
-        Examples
-        --------
-        >>> loader = ScalingZipLoader("scaler_archive.zip")
-        >>> loader._load_from_zip()  # Manually reload if needed
+        Example
+        -------
+        >>> loader = ScalingZipLoader("config/RC_Tank_Env_scalers.zip")
+        >>> loader.summary()
+        dataset_name: RC_Tank_Env_Training
+        input_features: ['DATA_INPUT']
+        output_features: ['DATA_OUTPUT']
         """
-        if not self.zip_path.exists():
-            raise FileNotFoundError(f"❌ ZIP file not found at {self.zip_path}")
+        print("\n" + "=" * 50)
+        print(" " * 15 + "METADATA SUMMARY")
+        print("=" * 50)
+        if self.metadata:
+            print(yaml.dump(self.metadata, allow_unicode=True, sort_keys=False, indent=2))
+        else:
+            print("⚠️ No metadata available.")
+        print("=" * 50)
 
-        with zipfile.ZipFile(self.zip_path, "r") as zipf:
-            # Load serialized input/output scalers directly into memory
-            self.scaler_in = joblib.load(io.BytesIO(self._get_file_from_zip(zipf, "input_scaler")))
-            self.scaler_out = joblib.load(io.BytesIO(self._get_file_from_zip(zipf, "output_scaler")))
-            # Attempt to load metadata (optional)
-            self.metadata = self._safe_load_yaml(zipf)
-
-    def transform_input(self, X):
+    def transform_input(self, X: np.ndarray) -> np.ndarray:
         """
-        Transform (normalize) input data using the loaded input scaler.
+        Transform (scale) raw input data.
 
         Parameters
         ----------
         X : np.ndarray
-            Input data array to be scaled.
+            Raw input data, shape = (n_samples, n_input_features)
 
         Returns
         -------
         np.ndarray
-            Scaled input data array.
+            Scaled input data.
 
-        Examples
-        --------
-        >>> X = np.array([[1.0], [2.0], [3.0]])
-        >>> loader = ScalingZipLoader("scaler_archive.zip")
+        Example
+        -------
+        >>> X = np.array([[12.0, 15.5], [24.0, 23.9]])
         >>> X_scaled = loader.transform_input(X)
         """
         return self.scaler_in.transform(X)
 
-    def inverse_output(self, y_scaled):
+    def inverse_output(self, y_scaled: np.ndarray) -> np.ndarray:
         """
-        Inverse-transform scaled output data using the output scaler.
+        Inverse-transform scaled output data to the original range.
 
         Parameters
         ----------
         y_scaled : np.ndarray
-            Scaled output data to be inverse-transformed.
+            Scaled output, shape = (n_samples, n_output_features)
 
         Returns
         -------
         np.ndarray
-            Original (unscaled) output data.
+            Original output values.
 
-        Examples
-        --------
-        >>> y_scaled = np.array([[0.0], [0.5], [1.0]])
-        >>> loader = ScalingZipLoader("scaler_archive.zip")
+        Example
+        -------
+        >>> y_scaled = np.array([[0.5], [1.0]])
         >>> y_original = loader.inverse_output(y_scaled)
         """
         return self.scaler_out.inverse_transform(y_scaled)
 
-    def is_loaded(self):
+    def is_loaded(self) -> bool:
         """
-        Check whether both scalers are successfully loaded.
+        Check whether both scalers and metadata were successfully loaded.
 
         Returns
         -------
         bool
-            True if both scalers exist, False otherwise.
+            True if all artifacts are loaded, False otherwise.
 
-        Examples
-        --------
-        >>> loader = ScalingZipLoader("scaler_archive.zip")
+        Example
+        -------
         >>> loader.is_loaded()
         True
         """
-        return all([self.scaler_in is not None, self.scaler_out is not None])
-
-    def summary(self):
-        """
-        Print a summary of loaded scalers and metadata.
-
-        This is a human-readable representation of the loaded metadata
-        that helps verify the content of the ZIP archive.
-
-        Examples
-        --------
-        >>> loader = ScalingZipLoader("scaler_archive.zip")
-        >>> loader.summary()
-        📦 ScalingZipLoader Summary:
-          input_feature_range: (-1, 1)
-          output_feature_range: (0, 10)
-          description: Test scaler zip file
-        """
-        print("📦 ScalingZipLoader Summary:")
-        if self.metadata:
-            for k, v in self.metadata.items():
-                print(f"  {k}: {v}")
-        else:
-            print("  ⚠️ No metadata available")
+        return all([self.scaler_in, self.scaler_out, self.metadata])
 
 
-# =====================================================
-# 🔽 Test Section — Demonstration of usage
-# =====================================================
+# ---------------------------------------------------------------------
+# Example Standalone Run
+# ---------------------------------------------------------------------
 if __name__ == "__main__":
-    print("🧪 Starting ScalingZipLoader test ...")
+    ZIP_FILE_PATH = Path(
+        r"D:\Project_end\New_world\my_project\config\RC_Tank_Env_scalers.zip"
+    )
+    print(f"🧪 Attempting to load scaling artifacts from: {ZIP_FILE_PATH}")
 
-    test_zip_path = Path(r"D:\Project_end\New_world\my_project\config\RC_Tank_Env_Training2_scalers.zip")
+    try:
+        loader = ScalingZipLoader(ZIP_FILE_PATH)
+        loader.summary()
 
-    # Check whether ZIP file already exists
-    if test_zip_path.exists():
-        print(f"📂 File already exists at: {test_zip_path}")
-        choice = input("Would you like to (r) read the file or (w) overwrite it? [r/w]: ").strip().lower()
-    else:
-        choice = "w"
+        if loader.is_loaded():
+            X_test = np.array([[12.0, 15.5], [24.0, 23.9]])
+            y_test_scaled = np.array([[0.5], [1.0]])
 
-    # Option 1: Create new ZIP archive with test data
-    if choice == "w":
-        print("✏️ Creating a new ZIP file...")
+            X_scaled = loader.transform_input(X_test)
+            y_inverse = loader.inverse_output(y_test_scaled)
 
-        X = np.array([[0], [1], [2], [3], [4]], dtype=float)
-        scaler_in = MinMaxScaler(feature_range=(-1, 1)).fit(X)
-        scaler_out = MinMaxScaler(feature_range=(0, 10)).fit(X)
-        metadata = {
-            "input_feature_range": "(-1, 1)",
-            "output_feature_range": "(0, 10)",
-            "description": "Test scaler zip file",
-        }
+            print("\n🔹 Example Data Transformation:")
+            print(f"  Original Input:\n{X_test}")
+            print(f"  Scaled Input:\n{X_scaled}")
+            print("-" * 30)
+            print(f"  Scaled Output:\n{y_test_scaled}")
+            print(f"  Inverse Output:\n{y_inverse}")
 
-        with zipfile.ZipFile(test_zip_path, "w") as zipf:
-            # Save both scalers in serialized form
-            buffer_in = io.BytesIO()
-            joblib.dump(scaler_in, buffer_in)
-            zipf.writestr("input_scaler.pkl", buffer_in.getvalue())
+        print("\n🎉 Test completed successfully.")
 
-            buffer_out = io.BytesIO()
-            joblib.dump(scaler_out, buffer_out)
-            zipf.writestr("output_scaler.pkl", buffer_out.getvalue())
-
-            # Save YAML metadata
-            zipf.writestr("metadata.yaml", yaml.safe_dump(metadata))
-
-        print(f"✅ New ZIP file created at: {test_zip_path.resolve()}")
-
-    elif choice == "r":
-        print("📖 Reading existing ZIP file...")
-
-    else:
-        print("⚠️ Invalid choice — reading existing file instead")
-
-    # Load ZIP using ScalingZipLoader
-    loader = ScalingZipLoader(test_zip_path)
-
-    # Display metadata summary
-    loader.summary()
-
-    # Demonstrate transform and inverse-transform behavior
-    X_test = np.array([[1.5], [3.0]])
-    X_scaled = loader.transform_input(X_test)
-    y_inverse = loader.inverse_output(X_scaled)
-
-    print("\n🔹 Example data transformation:")
-    print(f"  Original data:\n{X_test}")
-    print(f"  Scaled with input_scaler:\n{X_scaled}")
-    print(f"  Inverse-transformed with output_scaler:\n{y_inverse}")
-
-    print("\n🎉 Test completed successfully")
+    except FileNotFoundError as e:
+        print(f"\n{e}")
+    except Exception as e:
+        print(f"\nAn unexpected error occurred: {e}")
