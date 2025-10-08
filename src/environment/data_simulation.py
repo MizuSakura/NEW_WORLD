@@ -115,14 +115,24 @@ if __name__ == "__main__":
     parser.add_argument('--duty', type=float, default=0.5, help='PWM duty cycle')
     parser.add_argument('--freq', type=float, default=1.0, help='PWM frequency')
     
+    # --- Arguments สำหรับ "โหมดจัดเลี้ยง" (ใหม่!) ---
+    parser.add_argument('--batch_mode', action='store_true', help='Enable batch processing mode')
+    parser.add_argument('--duty_start', type=float, default=0.1)
+    parser.add_argument('--duty_end', type=float, default=1.0)
+    parser.add_argument('--duty_steps', type=int, default=10)
+    parser.add_argument('--freq_start', type=float, default=0.1)
+    parser.add_argument('--freq_end', type=float, default=2.0)
+    parser.add_argument('--freq_steps', type=int, default=5)
+
     # 4. "อ่านคำสั่ง" ที่ส่งเข้ามา
     args = parser.parse_args()
 
     # 5. ใช้ "คำสั่งที่อ่านได้" ในการสร้าง Env และ Signal
     env = RC_Tank_Env(R=args.R, C=args.C, dt=args.dt, control_mode=args.control_mode, 
-                      setpoint_level=args.setpoint_level, level_max=args.level_max,
-                      max_action_volt=args.max_action_volt, max_action_current=args.max_action_current)
-    
+                    setpoint_level=args.setpoint_level, level_max=args.level_max,
+                    max_action_volt=args.max_action_volt, max_action_current=args.max_action_current)
+
+  
     sg = SignalGenerator(t_end=args.time_sim, dt=args.dt)
 
     # signal_params = {
@@ -130,37 +140,43 @@ if __name__ == "__main__":
     #     'duty': args.duty,
     #     'freq': args.freq
     # }     
-
-    signal_params = {'amplitude': args.amplitude} 
-    if args.signal_type == 'pwm':
-        signal_params['duty'] = args.duty
-        signal_params['freq'] = args.freq
-
+    
     folder_csv = Path("./data/raw")
     folder_plot = Path("./data/picture")
     
-    # 6. รัน Simulation ด้วยค่าที่กำหนด!
-    run_simulation(env, sg, signal_type=args.signal_type, signal_params=signal_params,
-                   log_dt=0.1, folder_save_csv=folder_csv,
-                   folder_save_plot=folder_plot, file_prefix=f"sim_{args.signal_type}")
+    if args.batch_mode:
+        # --- โหมดจัดเลี้ยง ---
+        print("--- Running in Batch Mode ---")
+        duty_list = np.linspace(args.duty_start, args.duty_end, args.duty_steps)
+        freq_list = np.linspace(args.freq_start, args.freq_end, args.freq_steps)
+        
+        total_files = len(duty_list) * len(freq_list)
+        count = 0
+        for duty in duty_list:
+            for freq in freq_list:
+                count += 1
+                print(f"Running simulation {count}/{total_files} (duty={duty:.2f}, freq={freq:.2f})...")
+                signal_params = {'amplitude': args.amplitude, 'freq': freq, 'duty': duty}
+                file_prefix = f"pwm_duty_{duty:.2f}_freq_{freq:.2f}"
+                run_simulation(env, sg, signal_type='pwm', signal_params=signal_params,
+                               log_dt=0.1, folder_save_csv=folder_csv,
+                               folder_save_plot=folder_plot, file_prefix=file_prefix)
+        print("--- Batch Mode Completed ---")
 
-    print(f"Simulation with {args.signal_type} completed successfully!")
-    
+    else:
+        # --- โหมดอาหารตามสั่ง ---
+        print("--- Running in Single Mode ---")
+        signal_params = {'amplitude': args.amplitude}
+        if args.signal_type == 'pwm':
+            signal_params['duty'] = args.duty
+            signal_params['freq'] = args.freq
+        
+        run_simulation(env, sg, signal_type=args.signal_type, signal_params=signal_params,
+                       log_dt=0.1, folder_save_csv=folder_csv,
+                       folder_save_plot=folder_plot, file_prefix=f"sim_{args.signal_type}")
+        print(f"Single simulation with {args.signal_type} completed successfully!")
 
-# fix title to read N/A by
- # --- หัวใจของการแก้ไข! ---
-    # # สร้าง Title แบบไดนามิก
-    # title = f"Simulation - {signal_type}"
-    # duty = signal_params.get('duty')
-    # freq = signal_params.get('freq')
-    
-    # # เพิ่มรายละเอียดลงใน Title เฉพาะเมื่อมีค่านั้นอยู่จริง
-    # details = []
-    # if duty is not None:
-    #     details.append(f"duty={duty:.2f}")
-    # if freq is not None:
-    #     details.append(f"freq={freq:.2f}")
-    
-    # if details:
-    #     title += f" ({', '.join(details)})"
+
+
+
     
