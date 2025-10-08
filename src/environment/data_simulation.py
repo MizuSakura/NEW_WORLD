@@ -56,12 +56,30 @@ def run_simulation(env, signal_generator, signal_type='pwm', signal_params=None,
     file_name_csv = f"{file_prefix}_{signal_type}.csv"
     logger.save_to_csv(file_name=file_name_csv, folder_name=folder_save_csv)
 
+     # --- หัวใจของการแก้ไข! ---
+    # สร้าง Title แบบไดนามิก
+    title = f"Simulation - {signal_type}"
+    duty = signal_params.get('duty')
+    freq = signal_params.get('freq')
+    
+    # เพิ่มรายละเอียดลงใน Title เฉพาะเมื่อมีค่านั้นอยู่จริง
+    details = []
+    if duty is not None:
+        details.append(f"duty={duty:.2f}")
+    if freq is not None:
+        details.append(f"freq={freq:.2f}")
+    
+    if details:
+        title += f" ({', '.join(details)})"
+    
+
     # --- ส่วนที่แก้ไข ---
     # Plot
     plt.figure(figsize=(10,4))
     plt.plot(TIME_LOG, DATA_OUTPUT, label='DATA_OUTPUT')
     plt.plot(TIME_LOG, ACTION, label='DATA_INPUT', alpha=0.5)
-    plt.title(f"Simulation - {signal_type} (duty={signal_params.get('duty', 'N/A'):.2f}, freq={signal_params.get('freq', 'N/A'):.2f})")
+    plt.title(title) # อันนี้ใช้ตัวแปร title แทน
+    # plt.title(f"Simulation - {signal_type} (duty={signal_params.get('duty', 'N/A'):.2f}, freq={signal_params.get('freq', 'N/A'):.2f})")
     plt.xlabel("Time [s]")
     plt.ylabel("Amplitude")
     plt.grid(True)
@@ -128,4 +146,20 @@ if __name__ == "__main__":
 
     print(f"Simulation with {args.signal_type} completed successfully!")
 
-
+# fix title to read N/A by
+ # --- หัวใจของการแก้ไข! ---
+    # # สร้าง Title แบบไดนามิก
+    # title = f"Simulation - {signal_type}"
+    # duty = signal_params.get('duty')
+    # freq = signal_params.get('freq')
+    
+    # # เพิ่มรายละเอียดลงใน Title เฉพาะเมื่อมีค่านั้นอยู่จริง
+    # details = []
+    # if duty is not None:
+    #     details.append(f"duty={duty:.2f}")
+    # if freq is not None:
+    #     details.append(f"freq={freq:.2f}")
+    
+    # if details:
+    #     title += f" ({', '.join(details)})"
+    
