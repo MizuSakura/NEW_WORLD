@@ -202,7 +202,7 @@ if __name__ == "__main__":
         loader.summary()
 
         if loader.is_loaded():
-            X_test = np.array([[12.0, 15.5], [24.0, 23.9]])
+            X_test = np.array([[12], [24.0]])
             y_test_scaled = np.array([[0.5], [1.0]])
 
             X_scaled = loader.transform_input(X_test)
