@@ -1,0 +1,73 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="600"
+        x:Class="MyAvaloniaApp2.MainWindow"
+        Title="AI Factory Control Panel">
+
+    <Grid ColumnDefinitions="2*,3*" RowDefinitions="*" Margin="10">
+        
+        <Border Grid.Column="0" BorderBrush="LightGray" BorderThickness="1" Padding="10">
+            <ScrollViewer>
+                <StackPanel Spacing="10">
+                    <TextBlock FontSize="18" FontWeight="Bold">Simulation Controls</TextBlock>
+                    
+                    <TextBlock FontWeight="Bold" Margin="0,10,0,0">Environment Settings</TextBlock>
+                    <Grid ColumnDefinitions="*,2*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto" RowSpacing="5">
+                        <Label Grid.Row="0" Grid.Column="0">R:</Label>
+                        <TextBox Name="RTextBox" Text="1.5" Grid.Row="0" Grid.Column="1"/>
+                        <Label Grid.Row="1" Grid.Column="0">C:</Label>
+                        <TextBox Name="CTextBox" Text="2.0" Grid.Row="1" Grid.Column="1"/>
+                        <Label Grid.Row="2" Grid.Column="0">dt:</Label>
+                        <TextBox Name="DtTextBox" Text="0.01" Grid.Row="2" Grid.Column="1"/>
+                        <Label Grid.Row="3" Grid.Column="0">Setpoint:</Label>
+                        <TextBox Name="SetpointTextBox" Text="5.0" Grid.Row="3" Grid.Column="1"/>
+                        <Label Grid.Row="4" Grid.Column="0">Control Mode:</Label>
+                        <ComboBox Name="ControlModeComboBox" SelectedIndex="0" Grid.Row="4" Grid.Column="1">
+                            <ComboBoxItem>voltage</ComboBoxItem>
+                            <ComboBoxItem>current</ComboBoxItem>
+                        </ComboBox>
+                    </Grid>
+
+                    <TextBlock FontWeight="Bold" Margin="0,15,0,0">Signal Settings</TextBlock>
+                    <Grid ColumnDefinitions="*,2*" RowDefinitions="Auto,Auto,Auto,Auto,Auto" RowSpacing="5">
+                         <Label Grid.Row="0" Grid.Column="0">Sim Time:</Label>
+                        <TextBox Name="TimeSimTextBox" Text="30.0" Grid.Row="0" Grid.Column="1"/>
+                        <Label Grid.Row="1" Grid.Column="0">Signal Type:</Label>
+                        <ComboBox Name="SignalTypeComboBox" SelectedIndex="0" Grid.Row="1" Grid.Column="1">
+                            <ComboBoxItem>pwm</ComboBoxItem>
+                            <ComboBoxItem>step</ComboBoxItem>
+                            <ComboBoxItem>ramp</ComboBoxItem>
+                            <ComboBoxItem>impulse</ComboBoxItem>
+                        </ComboBox>
+                        <Label Grid.Row="2" Grid.Column="0">Amplitude:</Label>
+                        <TextBox Name="AmplitudeTextBox" Text="12.0" Grid.Row="2" Grid.Column="1"/>
+                        <Label Grid.Row="3" Grid.Column="0">Duty Cycle:</Label>
+                        <TextBox Name="DutyTextBox" Text="0.5" Grid.Row="3" Grid.Column="1"/>
+                        <Label Grid.Row="4" Grid.Column="0">Frequency:</Label>
+                        <TextBox Name="FreqTextBox" Text="1.0" Grid.Row="4" Grid.Column="1"/>
+                    </Grid>
+
+                    <StackPanel Spacing="10" Margin="0,20,0,0">
+                         <Button Name="StartSimulationButton" Click="StartProcessButton_Click" HorizontalAlignment="Stretch" Classes="accent">
+                            Start Data Simulation
+                        </Button>
+                        <Button Name="StartScalingButton" Click="StartProcessButton_Click" HorizontalAlignment="Stretch">
+                            Start Data Scaling
+                        </Button>
+                    </StackPanel>
+                </StackPanel>
+            </ScrollViewer>
+        </Border>
+
+        <DockPanel Grid.Column="1" Margin="10,0,0,0">
+            <TextBlock DockPanel.Dock="Top" FontSize="18" FontWeight="Bold">Process Log</TextBlock>
+            <Border BorderBrush="Gray" BorderThickness="1">
+                <ScrollViewer Name="LogScrollViewer">
+                    <TextBlock Name="LogTextBlock" Padding="5" TextWrapping="Wrap"/>
+                </ScrollViewer>
+            </Border>
+        </DockPanel>
+    </Grid>
+</Window>

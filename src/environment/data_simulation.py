@@ -145,6 +145,7 @@ if __name__ == "__main__":
                    folder_save_plot=folder_plot, file_prefix=f"sim_{args.signal_type}")
 
     print(f"Simulation with {args.signal_type} completed successfully!")
+    
 
 # fix title to read N/A by
  # --- หัวใจของการแก้ไข! ---
