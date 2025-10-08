@@ -95,7 +95,7 @@ class GlobalScalingReference:
         # Initialize class attributes
         self.data_dir = Path(data_dir)
         self.dataset_name = dataset_name
-        self.input_features = input_features or ["PWM_duty", "Prev_output"]
+        self.input_features = input_features or ["PWM_duty"]
         self.output_features = output_features or ["Tank_level"]
         self.chunk_size = chunk_size
         self.scaler_type = scaler_type
@@ -309,9 +309,9 @@ if __name__ == "__main__":
 
     FOLDER_DATA = r"D:\Project_end\New_world\my_project\data\raw"
     FOLDER_SAVE_SCALE = r"D:\Project_end\New_world\my_project\config"
-    DATASET_NAME = "RC_Tank_Env"
+    DATASET_NAME = "Test_scale1"
 
-    INPUT_FEATURES = ["DATA_INPUT", "DATA_OUTPUT"]
+    INPUT_FEATURES = ["DATA_INPUT"]
     OUTPUT_FEATURES = ["DATA_OUTPUT"]
 
     SCALER_TYPE = "MinMaxScaler"
