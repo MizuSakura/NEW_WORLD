@@ -38,6 +38,21 @@ class SimulationParams(BaseModel):
     duty: float = 0.5
     freq: float = 1.0
 
+class BatchSimulationParams(BaseModel):
+    # พารามิเตอร์ Env พื้นฐาน
+    R: float = 1.5
+    C: float = 2.0
+    dt: float = 0.01
+    setpoint_level: float = 5.0
+    time_sim: float = 30.0
+    amplitude: float = 12.0
+    # พารามิเตอร์สำหรับ Batch
+    duty_start: float = 0.1
+    duty_end: float = 1.0
+    duty_steps: int = 10
+    freq_start: float = 0.1
+    freq_end: float = 2.0
+    freq_steps: int = 5
 
 # --- ฟังก์ชัน "แอบดูไฟล์" (ใหม่!) ---
 async def tail_log_file(websocket: WebSocket, log_path: Path):
@@ -67,15 +82,7 @@ async def websocket_endpoint(websocket: WebSocket):
     # รอรับข้อความแรกจาก C# เพื่อบอกว่าจะให้ดูไฟล์ไหน
     log_type = await websocket.receive_text()
     
-    # log_file_path = None
-    # if log_type == "scaling":
-    #     log_file_path = LOG_DIR / "scaling_output.log"
-    # elif log_type == "training":
-    #     log_file_path = LOG_DIR / "training_output.log"
-    # else:
-    #     await websocket.send_text("Error: Invalid log type specified.")
-    #     await websocket.close()
-    #     return
+    
     log_files = {
         "simulation": LOG_DIR / "simulation_output.log",
         "scaling": LOG_DIR / "scaling_output.log",
@@ -119,10 +126,17 @@ def start_background_process(script_path: Path, log_name: str, args_dict: dict |
     command = [PYTHON_EXECUTABLE, "-u", "-m", module_path]
     if args_dict:
         for key, value in args_dict.items():
-            command.append(f"--{key}")
-            command.append(str(value))
+            # เช็คก่อนว่าค่าที่ได้เป็น boolean รึเปล่า
+            if isinstance(value, bool):
+                # ถ้าเป็น True... ก็แค่ "ดีดสวิตช์"
+                if value:
+                    command.append(f"--{key}")
+                # ถ้าเป็น False... ก็ "ไม่ต้องไปยุ่งกับมัน"
+            else:
+                # ถ้าเป็นค่าอื่นๆ ก็ใส่ตามปกติ
+                command.append(f"--{key}")
+                command.append(str(value))
     
-
 
 
     log_out = open(LOG_DIR / f"{log_name}_output.log", "w", encoding='utf-8')
@@ -142,27 +156,41 @@ def start_background_process(script_path: Path, log_name: str, args_dict: dict |
     return {"message": f"Process '{log_name}' started. Monitoring log file..."}
 
 
-# @app.post("/start-simulation")
-# async def trigger_simulation():
-#     return start_background_process(SIMULATION_SCRIPT_PATH, "simulation")
 
-# @app.post("/start-scaling")
-# async def trigger_scaling():
-#     return start_background_process(RESCALE_SCRIPT_PATH, "scaling")
+# @app.post("/start-simulation")
+# async def trigger_simulation(params: SimulationParams): # <-- รับ "แบบฟอร์ม" จาก C#!
+#     # แปลง "แบบฟอร์ม" เป็น Dictionary แล้วส่งต่อ
+#     return start_background_process(SIMULATION_SCRIPT_PATH, "simulation", args_dict=params.model_dump())
 
 @app.post("/start-simulation")
-async def trigger_simulation(params: SimulationParams): # <-- รับ "แบบฟอร์ม" จาก C#!
-    # แปลง "แบบฟอร์ม" เป็น Dictionary แล้วส่งต่อ
-    return start_background_process(SIMULATION_SCRIPT_PATH, "simulation", args_dict=params.model_dump())
+async def trigger_simulation(params: SimulationParams):
+    # เพิ่ม --batch_mode False เข้าไป เพื่อให้แน่ใจว่าทำงานถูกโหมด
+    args = params.model_dump()
+    args['batch_mode'] = False
+    return start_background_process(SIMULATION_SCRIPT_PATH, "simulation", args_dict=args)
+
+# --- ประตูสำหรับ "จัดเลี้ยง" (ใหม่!) ---
+@app.post("/start-simulation-batch")
+async def trigger_batch_simulation(params: BatchSimulationParams):
+    # แปลง "แบบฟอร์ม" เป็น Dictionary
+    args = params.model_dump()
+    # เพิ่ม --batch_mode True เพื่อเปิดใช้งาน "โหมดจัดเลี้ยง"
+    args['batch_mode'] = True
+    return start_background_process(SIMULATION_SCRIPT_PATH, "simulation", args_dict=args)
+
 
 @app.post("/start-scaling")
 async def trigger_scaling():
     # (ฟังก์ชันนี้ยังทำงานเหมือนเดิม เพราะยังไม่มีพารามิเตอร์)
     return start_background_process(RESCALE_SCRIPT_PATH, "scaling")
 
-# @app.post("/start-training")
-# async def trigger_training(params: TrainingParams): # For future use
-#     return start_background_process(TRAIN_SCRIPT_PATH, "training", args_dict=params.model_dump())
 
 
-# add_pydantic_buid_base model class_for_recive_C#
+
+
+# add_class BatchSimulationParams(BaseModel):_for batch sim parameters
+# add_endpoint /start-simulation-batch to handle batch simulation requests
+
+# แก้ args_dict ใน start_background_process เพื่อรองรับ boolean flags
+# เพิ่ม --batch_mode ใน args_dict เมื่อเรียก /start-simulation-batch
+
