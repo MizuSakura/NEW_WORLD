@@ -193,7 +193,7 @@ class ScalingZipLoader:
 # ---------------------------------------------------------------------
 if __name__ == "__main__":
     ZIP_FILE_PATH = Path(
-        r"D:\Project_end\New_world\my_project\config\RC_Tank_Env_scalers.zip"
+        r"D:\Project_end\New_world\my_project\config\Test_scale1_scalers.zip"
     )
     print(f"🧪 Attempting to load scaling artifacts from: {ZIP_FILE_PATH}")
 
