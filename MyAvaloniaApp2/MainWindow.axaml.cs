@@ -110,7 +110,7 @@ public partial class MainWindow : Window
     {
         try
         {
-             var batchParams = new BatchSimulationParams
+             var batchParams = new BatchSimulationParams // อ่านค่าจาก textbox และ combobox
             {
                 R = ParseValue<float>("BatchRTextBox"),
                 C = ParseValue<float>("BatchCTextBox"),
