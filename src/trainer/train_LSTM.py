@@ -10,7 +10,11 @@ import torch.nn as nn
 import torch.optim as optim
 import numpy as np
 import matplotlib.pyplot as plt
+import os
 import time
+
+# ⚡ optimized: enable benchmark for cuDNN (faster for fixed-size LSTM input)
+torch.backends.cudnn.benchmark = True
 
 
 class TRAIN_MODEL:
@@ -28,7 +32,7 @@ class TRAIN_MODEL:
                  chunksize=1000,
                  allow_padding=True,
                  pad_value=0.0,
-                 dataset_type="full",  # <--- เพิ่มตัวเลือก
+                 dataset_type="full",
 
                  # model & training
                  model_type="DeepLSTM",
@@ -115,8 +119,21 @@ class TRAIN_MODEL:
                 chunksize=self.chunksize
             )
 
-        self.dataloader = DataLoader(self.dataset, batch_size=self.batch_size, shuffle=True)
+        # ⚡ optimized: use efficient DataLoader settings
+        num_workers = min(8, os.cpu_count() or 1)
+        self.dataloader = DataLoader(
+            self.dataset,
+            batch_size=self.batch_size,
+            shuffle=True,
+            num_workers=num_workers,
+            pin_memory=True,
+            persistent_workers=True,
+            prefetch_factor=4
+        )
+
         print(f"[INFO] Dataset ready: {len(self.dataset)} samples | batch size = {self.batch_size}")
+        if torch.cuda.is_available():
+            print(f"[GPU INFO] Using: {torch.cuda.get_device_name(0)} | Memory allocated: {torch.cuda.memory_allocated()/1e6:.2f} MB")
 
     # ============================================
     # 🔹 Build Model
@@ -138,11 +155,16 @@ class TRAIN_MODEL:
             raise ValueError(f"Unknown model_type: {self.model_type}")
 
         self.model.to(self.device)
+
+        # ⚡ optimized: use compile (PyTorch 2.0+)
+        if hasattr(torch, "compile"):
+            self.model = torch.compile(self.model)
+
         self.optimizer = optim.Adam(self.model.parameters(), lr=self.lr)
         print(f"[INFO] Model {self.model_type} built successfully on {self.device}")
 
     # ============================================
-    # 🔹 Train Model
+    # 🔹 Train Model (optimized version)
     # ============================================
     def train(self):
         if self.dataset is None or self.model is None:
@@ -152,30 +174,44 @@ class TRAIN_MODEL:
         best_loss = np.inf
         best_state = None
         train_losses = []
+        patience_counter = 0
+
+        # ⚡ optimized: enable mixed precision
+        scaler = torch.amp.GradScaler('cuda', enabled=self.device.type == "cuda")
 
         for epoch in range(1, self.num_epochs + 1):
+            start_time = time.time()
             self.model.train()
-            total_loss = 0
+            total_loss = 0.0
 
             for xb, yb in self.dataloader:
-                xb, yb = xb.to(self.device), yb.to(self.device)
+                xb = xb.to(self.device, non_blocking=True).float()
+                yb = yb.to(self.device, non_blocking=True).float()
 
-                xb = xb.float()
-                yb = yb.float()
+                self.optimizer.zero_grad(set_to_none=True)
 
-                self.optimizer.zero_grad()
-                pred = self.model(xb)
-                loss = self.loss_fn(pred, yb)
-                loss.backward()
-                self.optimizer.step()
+                # ⚡ optimized: autocast for mixed precision
+                with torch.amp.autocast('cuda', enabled=self.device.type == "cuda"):
+                    pred = self.model(xb)
+                    loss = self.loss_fn(pred, yb)
+
+                scaler.scale(loss).backward()
+                scaler.step(self.optimizer)
+                scaler.update()
+
                 total_loss += loss.item()
 
+                # Detach hidden state if model supports it
                 if hasattr(self.model, "detach_state"):
                     self.model.detach_state()
 
             avg_loss = total_loss / len(self.dataloader)
             train_losses.append(avg_loss)
-            print(f"Epoch [{epoch}/{self.num_epochs}] - Loss: {avg_loss:.6f}")
+
+            # ⚡ optimized: print less frequently
+            if epoch % 5 == 0 or epoch == 1:
+                duration = time.time() - start_time
+                print(f"Epoch [{epoch}/{self.num_epochs}] - Loss: {avg_loss:.6f} | Time: {duration:.2f}s")
 
             # Early stopping
             if avg_loss < best_loss:
@@ -209,6 +245,7 @@ class TRAIN_MODEL:
         plt.legend()
         plt.show()
 
+
 if __name__ == "__main__":
     trainer = TRAIN_MODEL(
         data_folder=r"D:\Project_end\New_world\my_project\data\raw",
@@ -217,7 +254,8 @@ if __name__ == "__main__":
         dataset_type="lazy",
         model_type="DeepLSTM",
         num_epochs=50,
-        batch_size=500
+        batch_size=2048,  # ⚡ larger batch
+        hidden_dim=128    # ⚡ smaller hidden size for speed
     )
 
     trainer.prepare_data()
