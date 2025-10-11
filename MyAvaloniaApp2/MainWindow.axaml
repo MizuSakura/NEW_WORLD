@@ -1,124 +1,96 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
-        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="650"
+        xmlns:vm="using:MyAvaloniaApp2"
         x:Class="MyAvaloniaApp2.MainWindow"
-        Title="AI Factory Control Panel v2.0">
+        x:DataType="vm:MainWindowViewModel"
+        Title="AI Factory Control Panel (MVVM Edition)"
+        Width="800" Height="650">
 
-    <Grid ColumnDefinitions="300,*" RowDefinitions="*" Margin="10">
+    <Grid ColumnDefinitions="320,*" RowDefinitions="*" Margin="10">
         
-        <!-- === แผงควบคุม (ฝั่งซ้าย) === -->
         <TabControl Grid.Column="0">
-            
-            <!-- === TAB 1: อาหารตามสั่ง === -->
-            <TabItem Header="Single Simulation">
+            <TabItem Header="Simulation">
                 <ScrollViewer>
                     <StackPanel Spacing="10" Margin="10">
-                        <TextBlock FontWeight="Bold">Environment Settings</TextBlock>
-                        <Grid ColumnDefinitions="*,2*" RowDefinitions="*,*,*,*,*" RowSpacing="5">
-                            <Label Grid.Row="0" Grid.Column="0">R:</Label>
-                            <TextBox Name="RTextBox" Text="1.5" Grid.Row="0" Grid.Column="1"/>
-                            <Label Grid.Row="1" Grid.Column="0">C:</Label>
-                            <TextBox Name="CTextBox" Text="2.0" Grid.Row="1" Grid.Column="1"/>
-                            <Label Grid.Row="2" Grid.Column="0">dt:</Label>
-                            <TextBox Name="DtTextBox" Text="0.01" Grid.Row="2" Grid.Column="1"/>
-                            <Label Grid.Row="3" Grid.Column="0">Setpoint:</Label>
-                            <TextBox Name="SetpointTextBox" Text="5.0" Grid.Row="3" Grid.Column="1"/>
-                            <Label Grid.Row="4" Grid.Column="0">Control Mode:</Label>
-                            <ComboBox Name="ControlModeComboBox" SelectedIndex="0" Grid.Row="4" Grid.Column="1">
-                                <ComboBoxItem>voltage</ComboBoxItem>
-                                <ComboBoxItem>current</ComboBoxItem>
-                            </ComboBox>
+                        
+                        <TextBlock FontWeight="Bold">Base Settings</TextBlock>
+                        <Grid ColumnDefinitions="Auto,*" RowDefinitions="*,*,*,*,*,*" RowSpacing="5">
+                            <Label Grid.Row="0" Grid.Column="0" VerticalAlignment="Center">R:</Label>
+                            <TextBox Text="{Binding R}" Grid.Row="0" Grid.Column="1"/>
+                            <Label Grid.Row="1" Grid.Column="0" VerticalAlignment="Center">C:</Label>
+                            <TextBox Text="{Binding C}" Grid.Row="1" Grid.Column="1"/>
+                            <Label Grid.Row="2" Grid.Column="0" VerticalAlignment="Center">dt:</Label>
+                            <TextBox Text="{Binding Dt}" Grid.Row="2" Grid.Column="1"/>
+                            <Label Grid.Row="3" Grid.Column="0" VerticalAlignment="Center">Setpoint:</Label>
+                            <TextBox Text="{Binding Setpoint}" Grid.Row="3" Grid.Column="1"/>
+                            <Label Grid.Row="4" Grid.Column="0" VerticalAlignment="Center">Sim Time:</Label>
+                            <TextBox Text="{Binding TimeSim}" Grid.Row="4" Grid.Column="1"/>
+                            <Label Grid.Row="5" Grid.Column="0" VerticalAlignment="Center">Amplitude:</Label>
+                            <TextBox Text="{Binding Amplitude}" Grid.Row="5" Grid.Column="1"/>
                         </Grid>
 
-                        <TextBlock FontWeight="Bold" Margin="0,15,0,0">Signal Settings</TextBlock>
-                        <Grid ColumnDefinitions="*,2*" RowDefinitions="*,*,*,*,*" RowSpacing="5">
-                             <Label Grid.Row="0" Grid.Column="0">Sim Time:</Label>
-                            <TextBox Name="TimeSimTextBox" Text="30.0" Grid.Row="0" Grid.Column="1"/>
-                            <Label Grid.Row="1" Grid.Column="0">Signal Type:</Label>
-                            <ComboBox Name="SignalTypeComboBox" SelectedIndex="0" Grid.Row="1" Grid.Column="1">
-                                <ComboBoxItem>pwm</ComboBoxItem>
-                                <ComboBoxItem>step</ComboBoxItem>
-                                <ComboBoxItem>ramp</ComboBoxItem>
-                                <ComboBoxItem>impulse</ComboBoxItem>
-                            </ComboBox>
-                            <Label Grid.Row="2" Grid.Column="0">Amplitude:</Label>
-                            <TextBox Name="AmplitudeTextBox" Text="12.0" Grid.Row="2" Grid.Column="1"/>
-                            <Label Grid.Row="3" Grid.Column="0">Duty Cycle:</Label>
-                            <TextBox Name="DutyTextBox" Text="0.5" Grid.Row="3" Grid.Column="1"/>
-                            <Label Grid.Row="4" Grid.Column="0">Frequency:</Label>
-                            <TextBox Name="FreqTextBox" Text="1.0" Grid.Row="4" Grid.Column="1"/>
-                        </Grid>
+                        <CheckBox Margin="0,15,0,0" IsChecked="{Binding IsBatchModeEnabled}">
+                            Enable Batch Mode
+                        </CheckBox>
 
-                        <Button Name="StartSimulationButton" Click="StartSingleSimulationButton_Click" HorizontalAlignment="Stretch" Classes="accent" Margin="0,20,0,0">
-                            Run Single Simulation
+                        <Panel IsVisible="{Binding !IsBatchModeEnabled}">
+                            <StackPanel Spacing="10">
+                                <TextBlock FontWeight="Bold" Margin="0,5,0,0">Single Signal</TextBlock>
+                                <Grid ColumnDefinitions="*,2*" RowDefinitions="*,*" RowSpacing="5">
+                                    <Label Grid.Row="0" Grid.Column="0" VerticalAlignment="Center">Duty Cycle:</Label>
+                                    <TextBox Text="{Binding Duty}" Grid.Row="0" Grid.Column="1"/>
+                                    <Label Grid.Row="1" Grid.Column="0" VerticalAlignment="Center">Frequency:</Label>
+                                    <TextBox Text="{Binding Freq}" Grid.Row="1" Grid.Column="1"/>
+                                </Grid>
+                            </StackPanel>
+                        </Panel>
+
+                        <Panel IsVisible="{Binding IsBatchModeEnabled}">
+                             <StackPanel Spacing="10">
+                                <TextBlock FontWeight="Bold" Margin="0,5,0,0">Duty Cycle Range</TextBlock>
+                                <Grid ColumnDefinitions="*,2*" RowDefinitions="*,*,*" RowSpacing="5">
+                                    <Label Grid.Row="0" Grid.Column="0" VerticalAlignment="Center">Start:</Label>
+                                    <TextBox Text="{Binding DutyStart}" Grid.Row="0" Grid.Column="1"/>
+                                    <Label Grid.Row="1" Grid.Column="0" VerticalAlignment="Center">End:</Label>
+                                    <TextBox Text="{Binding DutyEnd}" Grid.Row="1" Grid.Column="1"/>
+                                    <Label Grid.Row="2" Grid.Column="0" VerticalAlignment="Center">Steps:</Label>
+                                    <TextBox Text="{Binding DutySteps}" Grid.Row="2" Grid.Column="1"/>
+                                </Grid>
+                                
+                                <TextBlock FontWeight="Bold" Margin="0,5,0,0">Frequency Range</TextBlock>
+                                <Grid ColumnDefinitions="*,2*" RowDefinitions="*,*,*" RowSpacing="5">
+                                    <Label Grid.Row="0" Grid.Column="0" VerticalAlignment="Center">Start:</Label>
+                                    <TextBox Text="{Binding FreqStart}" Grid.Row="0" Grid.Column="1"/>
+                                    <Label Grid.Row="1" Grid.Column="0" VerticalAlignment="Center">End:</Label>
+                                    <TextBox Text="{Binding FreqEnd}" Grid.Row="1" Grid.Column="1"/>
+                                    <Label Grid.Row="2" Grid.Column="0" VerticalAlignment="Center">Steps:</Label>
+                                    <TextBox Text="{Binding FreqSteps}" Grid.Row="2" Grid.Column="1"/>
+                                </Grid>
+                            </StackPanel>
+                        </Panel>
+
+                        <Button Command="{Binding RunSimulationCommand}" HorizontalAlignment="Stretch" Classes="accent" Margin="0,20,0,0">
+                            Run Simulation
                         </Button>
                     </StackPanel>
                 </ScrollViewer>
             </TabItem>
             
-            <!-- === TAB 2: จัดเลี้ยง === -->
-            <TabItem Header="Batch Simulation">
-                 <ScrollViewer>
-                    <StackPanel Spacing="10" Margin="10">
-                        <TextBlock FontWeight="Bold">Base Settings</TextBlock>
-                        <Grid ColumnDefinitions="*,2*" RowDefinitions="*,*,*,*,*" RowSpacing="5">
-                            <Label Grid.Row="0" Grid.Column="0">R:</Label>
-                            <TextBox Name="BatchRTextBox" Text="1.5" Grid.Row="0" Grid.Column="1"/>
-                            <Label Grid.Row="1" Grid.Column="0">C:</Label>
-                            <TextBox Name="BatchCTextBox" Text="2.0" Grid.Row="1" Grid.Column="1"/>
-                            <Label Grid.Row="2" Grid.Column="0">Sim Time:</Label>
-                            <TextBox Name="BatchTimeSimTextBox" Text="30.0" Grid.Row="2" Grid.Column="1"/>
-                            <Label Grid.Row="3" Grid.Column="0">Amplitude:</Label>
-                            <TextBox Name="BatchAmplitudeTextBox" Text="12.0" Grid.Row="3" Grid.Column="1"/>
-                        </Grid>
-
-                        <TextBlock FontWeight="Bold" Margin="0,15,0,0">Duty Cycle Range</TextBlock>
-                         <Grid ColumnDefinitions="*,2*" RowDefinitions="*,*,*" RowSpacing="5">
-                            <Label Grid.Row="0" Grid.Column="0">Start:</Label>
-                            <TextBox Name="DutyStartTextBox" Text="0.1" Grid.Row="0" Grid.Column="1"/>
-                            <Label Grid.Row="1" Grid.Column="0">End:</Label>
-                            <TextBox Name="DutyEndTextBox" Text="1.0" Grid.Row="1" Grid.Column="1"/>
-                            <Label Grid.Row="2" Grid.Column="0">Steps:</Label>
-                            <TextBox Name="DutyStepsTextBox" Text="10" Grid.Row="2" Grid.Column="1"/>
-                        </Grid>
-
-                        <TextBlock FontWeight="Bold" Margin="0,15,0,0">Frequency Range</TextBlock>
-                        <Grid ColumnDefinitions="*,2*" RowDefinitions="*,*,*" RowSpacing="5">
-                            <Label Grid.Row="0" Grid.Column="0">Start:</Label>
-                            <TextBox Name="FreqStartTextBox" Text="0.1" Grid.Row="0" Grid.Column="1"/>
-                            <Label Grid.Row="1" Grid.Column="0">End:</Label>
-                            <TextBox Name="FreqEndTextBox" Text="2.0" Grid.Row="1" Grid.Column="1"/>
-                            <Label Grid.Row="2" Grid.Column="0">Steps:</Label>
-                            <TextBox Name="FreqStepsTextBox" Text="5" Grid.Row="2" Grid.Column="1"/>
-                        </Grid>
-                        
-                        <Button Name="StartBatchButton" Click="StartBatchSimulationButton_Click" HorizontalAlignment="Stretch" Classes="accent" Margin="0,20,0,0">
-                            Run Batch Simulation
-                        </Button>
-                    </StackPanel>
-                </ScrollViewer>
-            </TabItem>
-
-             <!-- === TAB 3: Scaling === -->
             <TabItem Header="Data Scaling">
                 <StackPanel Spacing="10" Margin="10">
-                    <TextBlock>Click the button below to start the data scaling process.</TextBlock>
-                    <Button Name="StartScalingButton" Click="StartScalingButton_Click" HorizontalAlignment="Stretch">
+                    <TextBlock TextWrapping="Wrap">Click the button below to start the data scaling process based on the CSV files generated by the simulation.</TextBlock>
+                    <Button Command="{Binding StartScalingCommand}" HorizontalAlignment="Stretch" Margin="0,10,0,0">
                         Start Data Scaling
                     </Button>
                 </StackPanel>
             </TabItem>
-
         </TabControl>
 
-        <!-- === Process Log (ฝั่งขวา) === -->
         <DockPanel Grid.Column="1" Margin="10,0,0,0">
             <TextBlock DockPanel.Dock="Top" FontSize="18" FontWeight="Bold">Process Log</TextBlock>
-            <Border BorderBrush="Gray" BorderThickness="1">
-                <ScrollViewer Name="LogScrollViewer">
-                    <TextBlock Name="LogTextBlock" Padding="5" TextWrapping="Wrap"/>
+            <Border BorderBrush="Gray" BorderThickness="1" Margin="0,5,0,0">
+                <ScrollViewer>
+                    <TextBlock Text="{Binding LogText}" Padding="5" TextWrapping="Wrap" FontFamily="Consolas,Monospace"/>
                 </ScrollViewer>
             </Border>
         </DockPanel>
