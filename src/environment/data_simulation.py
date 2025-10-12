@@ -77,7 +77,7 @@ def run_simulation(env, signal_generator, signal_type='pwm', signal_params=None,
 # Example run
 # -----------------------------
 if __name__ == "__main__":
-    TIME_SIM = 10000
+    TIME_SIM = 30000
     DT = 0.01
     DT_LOG = 0.1
     SETPOINT = 5.0
@@ -92,8 +92,8 @@ if __name__ == "__main__":
     folder_plot = Path("./data/picture")
 
     # ทดลองรันหลาย duty cycle และหลาย freq ของ PWM
-    duty_list = np.linspace(0.1, 1, 10)
-    freq_list = np.linspace(0.01, 1, 10)  # ตัวอย่างช่วง freq 0.1 ถึง 2.0 Hz
+    duty_list = np.linspace(0, 1, 10)
+    freq_list = np.linspace(0.01, 0.01, 1)  # ตัวอย่างช่วง freq 0.1 ถึง 2.0 Hz
 
     
     for duty in duty_list:
