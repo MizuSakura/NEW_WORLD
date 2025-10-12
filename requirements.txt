@@ -6,3 +6,5 @@ pyyaml
 matplotlib
 pytest
 nbdime
+prefetch-generator
+tqdm
