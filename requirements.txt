@@ -8,3 +8,4 @@ pytest
 nbdime
 prefetch-generator
 tqdm
+pyarrow
