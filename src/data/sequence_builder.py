@@ -216,3 +216,4 @@ if __name__ == "__main__":
     dataloader = DataLoader(dataset, batch_size=32, shuffle=True)
     batch_X, batch_y = next(iter(dataloader))
     print(f"Batch X shape: {batch_X.shape} | Batch y shape: {batch_y.shape}")
+    print(f"num dataset: {len(dataloader)}")
