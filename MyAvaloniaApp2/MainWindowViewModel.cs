@@ -9,6 +9,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Input;
+using System.Collections.Generic; // <--- เพิ่ม using statement นี้เข้าไปด้วย
 
 namespace MyAvaloniaApp2;
 
@@ -73,22 +74,34 @@ public class MainWindowViewModel : ViewModelBase
     private string _logText = "System Ready. Waiting for command.";
     public string LogText { get => _logText; set { _logText = value; OnPropertyChanged(); } }
     private bool _isBusy = false;
-    public bool IsBusy {
+    public bool IsBusy
+    {
         get => _isBusy;
-        set {
+        set
+        {
             _isBusy = value;
             OnPropertyChanged();
             OnPropertyChanged(nameof(IsNotBusy));
-            // --- คนส่งสัญญาณที่ต้องเพิ่มกลับเข้ามา ---
-        // บอกให้ RunSimulationCommand กลับไปเช็ค "กฎ" ของตัวเองใหม่
-        (RunSimulationCommand as RelayCommand)?.RaiseCanExecuteChanged();
-        // บอกให้ StartScalingCommand กลับไปเช็ค "กฎ" ของตัวเองใหม่
-        (StartScalingCommand as RelayCommand)?.RaiseCanExecuteChanged();
+
         }
     }
     #endregion
+    
+     #region ComboBox Properties
+    public List<string> ControlModes { get; } = new() { "voltage", "current" };
+    
+    private string _selectedControlMode = "voltage";
+    public string SelectedControlMode { get => _selectedControlMode; set { _selectedControlMode = value; OnPropertyChanged(); } }
 
-    public bool IsNotBusy => !IsBusy;
+    public List<string> SignalTypes { get; } = new() { "pwm", "step", "ramp", "impulse" };
+
+    private string _selectedSignalType = "pwm";
+    public string SelectedSignalType { get => _selectedSignalType; set { _selectedSignalType = value; OnPropertyChanged(); } }
+    #endregion
+
+
+
+    public bool IsNotBusy => !IsBusy; 
 
     public ICommand RunSimulationCommand { get; }
     public ICommand StartScalingCommand { get; }
@@ -96,13 +109,15 @@ public class MainWindowViewModel : ViewModelBase
     public MainWindowViewModel()
 {
     // นำเงื่อนไข CanExecute (_ => !IsBusy) กลับมาเหมือนเดิม
-    RunSimulationCommand = new RelayCommand(async _ => await ExecuteRunSimulation(), _ => !IsBusy);
-    StartScalingCommand = new RelayCommand(async _ => await ExecuteStartScaling(), _ => !IsBusy);
+    RunSimulationCommand = new RelayCommand(async _ => await ExecuteRunSimulation()); // <== ต้องเป็นแบบนี้!
+    StartScalingCommand = new RelayCommand(async _ => await ExecuteStartScaling()); // <== ต้องเป็นแบบนี้!
+
 }
 
 
     private async Task ExecuteRunSimulation()
     {
+        if (IsBusy) return; // ป้องกันการเรียกซ้ำขณะกำลังทำงาน
         IsBusy = true;
         try
         {
@@ -113,8 +128,8 @@ public class MainWindowViewModel : ViewModelBase
                 setpoint_level = float.Parse(Setpoint, CultureInfo.InvariantCulture),
                 time_sim = float.Parse(TimeSim, CultureInfo.InvariantCulture),
                 amplitude = float.Parse(Amplitude, CultureInfo.InvariantCulture),
-                control_mode = "voltage", // Should bind to a ComboBox
-                signal_type = "pwm"      // Should bind to a ComboBox
+                control_mode = SelectedControlMode,
+                signal_type = SelectedSignalType
             };
 
             if (IsBatchModeEnabled)
@@ -149,9 +164,18 @@ public class MainWindowViewModel : ViewModelBase
 
     private async Task ExecuteStartScaling()
     {
+        if (IsBusy) return; // ป้องกันการเรียกซ้ำขณะกำลังทำงาน
         IsBusy = true;
-        await ExecuteBackendProcess("/start-scaling", "scaling");
-        IsBusy = false;
+            try
+        {
+            // แก้ไข: ต้องมี try...finally ที่นี่ด้วยถึงจะสมบูรณ์แบบ!
+            await ExecuteBackendProcess("/start-scaling", "scaling");
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+        
     }
 
     private async Task ExecuteBackendProcess(string endpoint, string logType, HttpContent? payload = null)
