@@ -172,48 +172,125 @@ class LazyChunkedSequenceDataset(Dataset):
         y_seq = y_data[end - 1]  # many-to-one
 
         return np.array(X_seq), np.array(y_seq)
+    
+class PTSequenceDataset(Dataset):
+    """
+    Dataset full load สำหรับไฟล์ .pt (sequences พร้อมใช้งานแล้ว)
+    """
+    def __init__(self, folder_path):
+        self.folder_path = Path(folder_path)
+        self.files = list(self.folder_path.glob("*.pt"))
+        self.X_list, self.y_list = [], []
+
+        # โหลดทั้งหมดเข้าหน่วยความจำ
+        for f in self.files:
+            data = torch.load(f)
+            self.X_list.append(data['X'])
+            self.y_list.append(data['y'])
+
+        # รวม tensor ทั้งหมด
+        self.X = torch.cat(self.X_list, dim=0)
+        self.y = torch.cat(self.y_list, dim=0)
+
+    def __len__(self):
+        return len(self.X)
+
+    def __getitem__(self, idx):
+        return self.X[idx], self.y[idx]
+    
+class PTLazyChunkedSequenceDataset(Dataset):
+    """
+    Dataset lazy load สำหรับไฟล์ .pt
+    โหลดเฉพาะไฟล์ที่ต้องใช้ในแต่ละ batch
+    """
+    def __init__(self, folder_path):
+        self.folder_path = Path(folder_path)
+        self.files = list(self.folder_path.glob("*.pt"))
+        self.index_map = []
+
+        # สร้าง mapping (index → (file_path, local_index))
+        for f in self.files:
+            data = torch.load(f)
+            n = data['X'].shape[0]
+            self.index_map.extend([(f, i) for i in range(n)])
+
+    def __len__(self):
+        return len(self.index_map)
+
+    def __getitem__(self, idx):
+        file_path, local_idx = self.index_map[idx]
+        data = torch.load(file_path)
+        return data['X'][local_idx], data['y'][local_idx]
         
 if __name__ == "__main__":
+    # -----------------------------
+    # Config
+    # -----------------------------
     PATH_SCALE = r"D:\Project_end\New_world\my_project\config\Test_scale1_scalers.zip"
-    FOLDER_FILE = r"D:\Project_end\New_world\my_project\data\raw"
+    FOLDER_RAW = r"D:\Project_end\New_world\my_project\data\raw"
+    FOLDER_PT = r"D:\Project_end\New_world\my_project\data\processed"
 
-    # เลือก Dataset แบบไหนที่ต้องการทดสอบ: "full" หรือ "lazy"
-    dataset_type = "full"  # <-- เปลี่ยนเป็น "lazy" เพื่อทดสอบ LazyChunkedSequenceDataset
+    # เลือก dataset_type: "full" หรือ "lazy"
+    dataset_type = "full"  # full load / lazy load
+    # เลือก data_format: "csv" หรือ "pt"
+    data_format = "pt"  # ใช้ไฟล์ .pt หรือ CSV
 
-    if dataset_type == "full":
-        print("Testing SequenceDataset (full load)...")
-        dataset = SequenceDataset(
-            folder_path=FOLDER_FILE,
-            scale_path=PATH_SCALE,
-            sequence_size=11,
-            input_col=['DATA_INPUT'],
-            output_col=["DATA_OUTPUT"],
-            chunksize=1000,
-            allow_padding=True,
-            pad_value=0.0
-        )
-    elif dataset_type == "lazy":
-        print("Testing LazyChunkedSequenceDataset (lazy load)...")
-        dataset = LazyChunkedSequenceDataset(
-            folder_path=FOLDER_FILE,
-            scale_path=PATH_SCALE,
-            sequence_size=11,
-            input_col=['DATA_INPUT'],
-            output_col=["DATA_OUTPUT"],
-            chunksize=1000
-        )
+    # -----------------------------
+    # เลือก Dataset
+    # -----------------------------
+    dataset = None
+
+    if data_format == "csv":
+        if dataset_type == "full":
+            print("Testing SequenceDataset (CSV, full load)...")
+            dataset = SequenceDataset(
+                folder_path=FOLDER_RAW,
+                scale_path=PATH_SCALE,
+                sequence_size=11,
+                input_col=['DATA_INPUT'],
+                output_col=['DATA_OUTPUT'],
+                chunksize=1000,
+                allow_padding=True,
+                pad_value=0.0
+            )
+        elif dataset_type == "lazy":
+            print("Testing LazyChunkedSequenceDataset (CSV, lazy load)...")
+            dataset = LazyChunkedSequenceDataset(
+                folder_path=FOLDER_RAW,
+                scale_path=PATH_SCALE,
+                sequence_size=11,
+                input_col=['DATA_INPUT'],
+                output_col=['DATA_OUTPUT'],
+                chunksize=1000
+            )
+        else:
+            raise ValueError("dataset_type must be 'full' or 'lazy'")
+
+    elif data_format == "pt":
+        if dataset_type == "full":
+            print("Testing PTSequenceDataset (PT, full load)...")
+            dataset = PTSequenceDataset(FOLDER_PT)
+        elif dataset_type == "lazy":
+            print("Testing PTLazyChunkedSequenceDataset (PT, lazy load)...")
+            dataset = PTLazyChunkedSequenceDataset(FOLDER_PT)
+        else:
+            raise ValueError("dataset_type must be 'full' or 'lazy'")
     else:
-        raise ValueError("dataset_type must be 'full' or 'lazy'")
+        raise ValueError("data_format must be 'csv' or 'pt'")
 
+    # -----------------------------
     # ทดสอบดึงข้อมูลตัวอย่าง
+    # -----------------------------
     X, y = dataset[0]
     print(f"X shape: {X.shape} | y shape: {y.shape} | dataset length: {len(dataset)}")
     print(f"First sample y: {y}")
 
-    # สามารถทดสอบ DataLoader ได้ด้วย
+    # -----------------------------
+    # ทดสอบ DataLoader
+    # -----------------------------
     from torch.utils.data import DataLoader
 
     dataloader = DataLoader(dataset, batch_size=32, shuffle=True)
     batch_X, batch_y = next(iter(dataloader))
     print(f"Batch X shape: {batch_X.shape} | Batch y shape: {batch_y.shape}")
-    print(f"num dataset: {len(dataloader)}")
+    print(f"num batches: {len(dataloader)}")
