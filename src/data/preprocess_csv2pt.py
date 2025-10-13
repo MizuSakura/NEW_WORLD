@@ -11,13 +11,6 @@ import os
 
 
 class convert_csv2pt:
-    """
-    Ultra-fast CSV → .pt converter
-    ==============================
-    ใช้ PyArrow + multiprocessing เพื่อแปลงไฟล์ CSV ขนาดใหญ่เป็น PyTorch Tensor
-    โดยไม่กิน RAM และรองรับหลายคอลัมน์แบบ dynamic
-    """
-
     def __init__(self, input_folder, output_folder, scale_path,
                  input_col, output_col, sequence_size=10, chunksize=100000,
                  num_workers=4, allow_padding=True, pad_value=0.0):
@@ -41,8 +34,6 @@ class convert_csv2pt:
 
     # ----------------------------------------------------------------------
     def _read_chunk(self, file_path, skip_rows):
-        """อ่าน chunk จาก CSV ด้วย PyArrow แบบจำกัดจำนวนแถว (compatible ทุกเวอร์ชัน)"""
-        import pyarrow.csv as pv
 
         # ✅ ตั้งค่า options (เวอร์ชันใหม่ของ PyArrow)
         read_opts = pv.ReadOptions(skip_rows=skip_rows, autogenerate_column_names=False)
@@ -65,7 +56,6 @@ class convert_csv2pt:
 
     # ----------------------------------------------------------------------
     def _process_file(self, file_name):
-        """ประมวลผลไฟล์ CSV เดียว และบันทึกเป็น .pt"""
         file_path = self.input_folder / file_name
         total_rows = sum(1 for _ in open(file_path)) - 1
         num_chunks = max(1, total_rows // self.chunksize)
@@ -104,7 +94,6 @@ class convert_csv2pt:
 
     # ----------------------------------------------------------------------
     def create_sequences(self, X_data, y_data):
-        """สร้าง sequences แบบ many-to-one"""
         Xs, ys = [], []
         n = len(X_data)
 
@@ -120,7 +109,6 @@ class convert_csv2pt:
 
     # ----------------------------------------------------------------------
     def pad_or_truncate(self, seq):
-        """เติม padding หรือ truncate sequence"""
         if len(seq) < self.sequence_size:
             pad_size = self.sequence_size - len(seq)
             pad = np.full((pad_size, seq.shape[1]), self.pad_value)
@@ -131,7 +119,6 @@ class convert_csv2pt:
 
     # ----------------------------------------------------------------------
     def process_all(self):
-        """แปลงทุกไฟล์ใน input_folder แบบ parallel"""
         csv_files = [f for f in os.listdir(self.input_folder) if f.endswith('.csv')]
         print(f"[INFO] Found {len(csv_files)} CSV files")
 
