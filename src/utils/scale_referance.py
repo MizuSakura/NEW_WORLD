@@ -79,7 +79,7 @@ class GlobalScalingReference:
     'MinMaxScaler'
     """
 
-    def __init__(self, user_creatr, name_project,
+    def __init__(self, user_create, name_project,
                  data_dir,
                  dataset_name="RC_Tank_Env_Training",
                  input_features=None,
@@ -102,7 +102,7 @@ class GlobalScalingReference:
         self.time_format = time_format
 
         # --- Project metadata parameters ---
-        self.user_creatr = user_creatr
+        self.user_create = user_create
         self.name_project = name_project
         self.project_version = project_version
         self.description = description
@@ -222,11 +222,14 @@ class GlobalScalingReference:
         # Assemble metadata structure
         self.metadata = {
             "project": {
-                "name": self.name_project, "version": self.project_version,
-                "created_by": self.user_creatr, "created_at": now,
+                "name": self.name_project,
+                "version": self.project_version,
+                "created_by": self.user_create,
+                "created_at": now,
             },
             "dataset": {
-                "name": self.dataset_name, "source_files": [f.name for f in self.csv_files],
+                "name": self.dataset_name,
+                "source_files": [f.name for f in self.csv_files],
                 "total_rows": self.total_rows, "input_features": self.input_features,
                 "output_features": self.output_features,
             },
@@ -307,8 +310,9 @@ if __name__ == "__main__":
     # Example standalone execution for testing
     # Users can modify paths and parameters as needed
 
-    FOLDER_DATA = r"D:\Project_end\New_world\my_project\data\raw"
-    FOLDER_SAVE_SCALE = r"D:\Project_end\New_world\my_project\config"
+    ROOT_DIR = Path(__file__).resolve().parents[2]  
+    FOLDER_DATA = ROOT_DIR / "data" / "raw"        
+    FOLDER_SAVE_SCALE = ROOT_DIR / "config" 
     DATASET_NAME = "Test_scale1"
 
     INPUT_FEATURES = ["DATA_INPUT"]
