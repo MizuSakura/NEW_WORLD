@@ -1,56 +1,48 @@
-# src/environment/signal_generator.py
 import numpy as np
+from scipy.signal import sawtooth
 
 class SignalGenerator:
     """
-    Generator สำหรับสร้างสัญญาณ input
-    รองรับ:
-      - PWM
-      - Step
-      - Ramp
-      - Impulse
-      - Sinusoid (optional เพิ่มได้)
-    คืนค่า: time_array, signal
+    Generate various test input signals for simulation such as 
+    PWM, step, ramp, impulse, sinusoidal, and triangle waveforms.
     """
-    def __init__(self, t_end=100, dt=0.1):
-        self.dt = dt
-        self.t_end = t_end
-        self.time_array = np.arange(0, t_end, dt)
 
-    # -----------------------------
-    # Step signal
-    # -----------------------------
-    def step(self, amplitude=1.0, start_time=0.0):
-        signal = amplitude * (self.time_array >= start_time)
-        return self.time_array, signal
+    def __init__(self, t_end=10.0, dt=0.01):
+        """Initialize the signal generator with a time vector."""
+        self.dt = dt                      # ✅ add this line
+        self.t = np.arange(0, t_end, dt)
 
-    # -----------------------------
-    # Ramp signal
-    # -----------------------------
-    def ramp(self, slope=1.0, start_time=0.0):
-        signal = slope * np.maximum(0, self.time_array - start_time)
-        return self.time_array, signal
+    # ======================================================================
+    # PWM SIGNAL
+    # ======================================================================
+    def pwm(self, amplitude=1.0, duty_cycle=0.5, frequency=1.0,
+            freq=None, duty=None):
+        """Generate PWM signal."""
+        frequency = freq if freq is not None else frequency
+        duty_cycle = duty if duty is not None else duty_cycle
+        signal = amplitude * (np.mod(self.t * frequency, 1) < duty_cycle).astype(float)
+        return self.t, signal
 
-    # -----------------------------
-    # Impulse signal
-    # -----------------------------
-    def impulse(self, amplitude=1.0, at_time=0.0):
-        signal = np.zeros_like(self.time_array)
-        idx = np.argmin(np.abs(self.time_array - at_time))
+    def step(self, amplitude=1.0, start_time=1.0):
+        signal = np.where(self.t >= start_time, amplitude, 0.0)
+        return self.t, signal
+
+    def ramp(self, slope=0.5):
+        signal = slope * self.t
+        return self.t, signal
+
+    def impulse(self, amplitude=1.0, time=1.0):
+        signal = np.zeros_like(self.t)
+        idx = np.argmin(np.abs(self.t - time))
         signal[idx] = amplitude
-        return self.time_array, signal
+        return self.t, signal
 
-    # -----------------------------
-    # PWM signal
-    # -----------------------------
-    def pwm(self, amplitude=1.0, freq=1.0, duty=0.5):
-        T = 1 / freq
-        signal = amplitude * ((self.time_array % T) < duty * T)
-        return self.time_array, signal
+    def sinusoid(self, amplitude=1.0, frequency=1.0, phase=0.0, freq=None):
+        frequency = freq if freq is not None else frequency
+        signal = amplitude * np.sin(2 * np.pi * frequency * self.t + phase)
+        return self.t, signal
 
-    # -----------------------------
-    # Sinusoid (option)
-    # -----------------------------
-    def sinusoid(self, amplitude=1.0, freq=1.0, phase=0.0):
-        signal = amplitude * np.sin(2 * np.pi * freq * self.time_array + phase)
-        return self.time_array, signal
+    def triangle(self, amplitude=1.0, frequency=1.0, freq=None):
+        frequency = freq if freq is not None else frequency
+        signal = amplitude * sawtooth(2 * np.pi * frequency * self.t, width=0.5)
+        return self.t, signal
