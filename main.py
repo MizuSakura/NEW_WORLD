@@ -4,7 +4,8 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from pathlib import Path
 import os
 import asyncio
-from pydantic import BaseModel # เครื่องมือสร้างแบบ form
+from pydantic import BaseModel, Field 
+from typing import Optional
 
 # --- Configuration (เหมือนเดิม) ---
 PYTHON_EXECUTABLE = sys.executable 
@@ -24,35 +25,27 @@ app = FastAPI(title="AI Factory Controller")
 
 # --- "แบบฟอร์ม" รับข้อมูลจาก C# (ใหม่!) ---
 class SimulationParams(BaseModel):
+    # พารามิเตอร์พื้นฐาน (จำเป็นต้องมี)
     R: float = 1.5
     C: float = 2.0
     dt: float = 0.01
+    setpoint_level: float = 5.0
+    time_sim: float = 30.0
+    amplitude: float = 12.0
     control_mode: str = 'voltage'
-    setpoint_level: float = 5.0
-    level_max: float = 10.0
-    max_action_volt: float = 24.0
-    max_action_current: float = 5.0
-    time_sim: float = 30.0
     signal_type: str = 'pwm'
-    amplitude: float = 12.0
-    duty: float = 0.5
-    freq: float = 1.0
 
-class BatchSimulationParams(BaseModel):
-    # พารามิเตอร์ Env พื้นฐาน
-    R: float = 1.5
-    C: float = 2.0
-    dt: float = 0.01
-    setpoint_level: float = 5.0
-    time_sim: float = 30.0
-    amplitude: float = 12.0
-    # พารามิเตอร์สำหรับ Batch
-    duty_start: float = 0.1
-    duty_end: float = 1.0
-    duty_steps: int = 10
-    freq_start: float = 0.1
-    freq_end: float = 2.0
-    freq_steps: int = 5
+    # พารามิเตอร์สำหรับ Single Mode (Optional)
+    duty: Optional[float] = Field(None, description="Duty cycle for single run")
+    freq: Optional[float] = Field(None, description="Frequency for single run")
+
+    # พารามิเตอร์สำหรับ Batch Mode (Optional)
+    duty_start: Optional[float] = Field(None, description="Start duty cycle for batch run")
+    duty_end: Optional[float] = Field(None, description="End duty cycle for batch run")
+    duty_steps: Optional[int] = Field(None, description="Number of steps for duty cycle")
+    freq_start: Optional[float] = Field(None, description="Start frequency for batch run")
+    freq_end: Optional[float] = Field(None, description="End frequency for batch run")
+    freq_steps: Optional[int] = Field(None, description="Number of steps for frequency")
 
 # --- ฟังก์ชัน "แอบดูไฟล์" (ใหม่!) ---
 async def tail_log_file(websocket: WebSocket, log_path: Path):
@@ -132,7 +125,7 @@ def start_background_process(script_path: Path, log_name: str, args_dict: dict |
                 if value:
                     command.append(f"--{key}")
                 # ถ้าเป็น False... ก็ "ไม่ต้องไปยุ่งกับมัน"
-            else:
+            elif value is not None:
                 # ถ้าเป็นค่าอื่นๆ ก็ใส่ตามปกติ
                 command.append(f"--{key}")
                 command.append(str(value))
@@ -157,36 +150,40 @@ def start_background_process(script_path: Path, log_name: str, args_dict: dict |
 
 
 
-# @app.post("/start-simulation")
-# async def trigger_simulation(params: SimulationParams): # <-- รับ "แบบฟอร์ม" จาก C#!
-#     # แปลง "แบบฟอร์ม" เป็น Dictionary แล้วส่งต่อ
-#     return start_background_process(SIMULATION_SCRIPT_PATH, "simulation", args_dict=params.model_dump())
-
-@app.post("/start-simulation")
+@app.post("/simulation/run")
 async def trigger_simulation(params: SimulationParams):
-    # เพิ่ม --batch_mode False เข้าไป เพื่อให้แน่ใจว่าทำงานถูกโหมด
     args = params.model_dump()
-    args['batch_mode'] = False
+
+  # Logic to determine mode
+    is_batch = params.duty_steps is not None or params.freq_steps is not None
+    args['batch_mode'] = is_batch
+
     return start_background_process(SIMULATION_SCRIPT_PATH, "simulation", args_dict=args)
+
+
+
 
 # --- ประตูสำหรับ "จัดเลี้ยง" (ใหม่!) ---
-@app.post("/start-simulation-batch")
-async def trigger_batch_simulation(params: BatchSimulationParams):
-    # แปลง "แบบฟอร์ม" เป็น Dictionary
-    args = params.model_dump()
-    # เพิ่ม --batch_mode True เพื่อเปิดใช้งาน "โหมดจัดเลี้ยง"
-    args['batch_mode'] = True
-    return start_background_process(SIMULATION_SCRIPT_PATH, "simulation", args_dict=args)
+# @app.post("/start-simulation-batch")
+# async def trigger_batch_simulation(params: BatchSimulationParams):
+#     # แปลง "แบบฟอร์ม" เป็น Dictionary
+#     args = params.model_dump()
+#     # เพิ่ม --batch_mode True เพื่อเปิดใช้งาน "โหมดจัดเลี้ยง"
+#     args['batch_mode'] = True
+#     return start_background_process(SIMULATION_SCRIPT_PATH, "simulation", args_dict=args)
 
 
 @app.post("/start-scaling")
 async def trigger_scaling():
-    # (ฟังก์ชันนี้ยังทำงานเหมือนเดิม เพราะยังไม่มีพารามิเตอร์)
+    
     return start_background_process(RESCALE_SCRIPT_PATH, "scaling")
 
 
 
-
+# @app.post("/start-simulation")
+# async def trigger_simulation(params: SimulationParams): # <-- รับ "แบบฟอร์ม" จาก C#!
+#     # แปลง "แบบฟอร์ม" เป็น Dictionary แล้วส่งต่อ
+#     return start_background_process(SIMULATION_SCRIPT_PATH, "simulation", args_dict=params.model_dump())
 
 # add_class BatchSimulationParams(BaseModel):_for batch sim parameters
 # add_endpoint /start-simulation-batch to handle batch simulation requests
