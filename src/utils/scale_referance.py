@@ -340,7 +340,7 @@ if __name__ == "__main__":
         output_features=OUTPUT_FEATURES,
         scaler_type=SCALER_TYPE,
         chunk_size=CHUNK_SIZE,
-        user_creatr=USER_CREATOR,
+        user_create=USER_CREATOR,
         name_project=PROJECT_NAME,
         project_version=PROJECT_VERSION,
         description=DESCRIPTION,
