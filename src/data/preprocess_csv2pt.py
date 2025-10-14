@@ -8,12 +8,30 @@ import pyarrow.compute as pc
 from tqdm import tqdm
 import multiprocessing as mp
 import os
+from datetime import datetime
+import platform
+import psutil
+import yaml
+import zipfile
 
 
 class convert_csv2pt:
+    """
+    Convert large CSV datasets into .pt format for ML preprocessing.
+    Includes scaling (via loaded scalers), sequence creation, and
+    metadata generation for reproducibility and traceability.
+    """
+
     def __init__(self, input_folder, output_folder, scale_path,
                  input_col, output_col, sequence_size=10, chunksize=100000,
-                 num_workers=4, allow_padding=True, pad_value=0.0):
+                 num_workers=4, allow_padding=True, pad_value=0.0,
+                 user_create=None, name_project=None,
+                 time_format="%Y-%m-%d %H:%M:%S",
+                 project_version="1.0.0",
+                 description="Scaling reference for ML model preprocessing",
+                 notes=None):
+        
+        # Core paths and preprocessing configs
         self.input_folder = Path(input_folder)
         self.output_folder = Path(output_folder)
         self.scale_path = Path(scale_path)
@@ -25,22 +43,31 @@ class convert_csv2pt:
         self.allow_padding = allow_padding
         self.pad_value = pad_value
 
-        # โหลด Scaler
+        # Metadata info
+        self.user_create = user_create
+        self.name_project = name_project
+        self.project_version = project_version
+        self.description = description
+        self.notes = notes
+        self.time_format = time_format
+
+        # Load Scalers
         self.scaling_loader = ScalingZipLoader(scale_path)
         self.scaler_input = self.scaling_loader.scaler_in
         self.scaler_output = self.scaling_loader.scaler_out
 
         self.output_folder.mkdir(parents=True, exist_ok=True)
 
+        # Generate metadata on initialization
+        self.metadata = self.generate_metadata()
+
     # ----------------------------------------------------------------------
     def _read_chunk(self, file_path, skip_rows):
-
-        # ✅ ตั้งค่า options (เวอร์ชันใหม่ของ PyArrow)
+        """Read a chunk of CSV using PyArrow for efficient IO."""
         read_opts = pv.ReadOptions(skip_rows=skip_rows, autogenerate_column_names=False)
         parse_opts = pv.ParseOptions(delimiter=',')
         convert_opts = pv.ConvertOptions()
 
-        # ✅ อ่านไฟล์ CSV ทั้งหมดที่เหลือ แล้วตัดเฉพาะ rows ที่ต้องการ
         table = pv.read_csv(
             file_path,
             read_options=read_opts,
@@ -48,14 +75,12 @@ class convert_csv2pt:
             convert_options=convert_opts
         )
 
-        # ✅ slice เฉพาะส่วนที่ต้องการ (จำลอง nrows)
         table = table.slice(0, self.chunksize)
-
-        # ✅ แปลงกลับเป็น pandas DataFrame
         return table.to_pandas()
 
     # ----------------------------------------------------------------------
     def _process_file(self, file_name):
+        """Process a single CSV file: read, scale, and convert to PT."""
         file_path = self.input_folder / file_name
         total_rows = sum(1 for _ in open(file_path)) - 1
         num_chunks = max(1, total_rows // self.chunksize)
@@ -65,7 +90,6 @@ class convert_csv2pt:
             start = i * self.chunksize
             df = self._read_chunk(file_path, start)
 
-            # Extract & Scale
             X_data = df[self.input_col].to_numpy()
             y_data = df[self.output_col].to_numpy()
 
@@ -74,18 +98,20 @@ class convert_csv2pt:
             if y_data.ndim == 1:
                 y_data = y_data.reshape(-1, 1)
 
+            # Scale data
             X_scaled = self.scaler_input.transform(X_data)
             y_scaled = self.scaler_output.transform(y_data)
 
-            # Convert to sequences
+            # Sequence creation
             X_seq, y_seq = self.create_sequences(X_scaled, y_scaled)
             if len(X_seq) > 0:
                 X_total.append(X_seq)
                 y_total.append(y_seq)
 
-        # รวมทั้งหมดแล้วบันทึกเป็น .pt
         X_total = np.vstack(X_total)
         y_total = np.vstack(y_total)
+
+        # Save as .pt file
         torch.save({'X': torch.tensor(X_total, dtype=torch.float32),
                     'y': torch.tensor(y_total, dtype=torch.float32)},
                    self.output_folder / f"{file_name.replace('.csv', '.pt')}")
@@ -94,6 +120,7 @@ class convert_csv2pt:
 
     # ----------------------------------------------------------------------
     def create_sequences(self, X_data, y_data):
+        """Create time-series sequences for supervised learning."""
         Xs, ys = [], []
         n = len(X_data)
 
@@ -109,6 +136,7 @@ class convert_csv2pt:
 
     # ----------------------------------------------------------------------
     def pad_or_truncate(self, seq):
+        """Pad or truncate sequences to fixed length."""
         if len(seq) < self.sequence_size:
             pad_size = self.sequence_size - len(seq)
             pad = np.full((pad_size, seq.shape[1]), self.pad_value)
@@ -119,6 +147,7 @@ class convert_csv2pt:
 
     # ----------------------------------------------------------------------
     def process_all(self):
+        """Convert all CSV files in input folder to PT format."""
         csv_files = [f for f in os.listdir(self.input_folder) if f.endswith('.csv')]
         print(f"[INFO] Found {len(csv_files)} CSV files")
 
@@ -127,20 +156,158 @@ class convert_csv2pt:
                       total=len(csv_files),
                       desc="Converting CSV → PT"))
 
+        # Save metadata and zip results
+        metadata_path = self.save_metadata()
+        self.package_to_zip(metadata_path, cleanup=True)
+
+    # ----------------------------------------------------------------------
+    def generate_metadata(self):
+        """Generate reproducible metadata about system, dataset, and preprocessing."""
+        project_info = {
+            "project_name": self.name_project,
+            "created_by": self.user_create,
+            "created_at": datetime.now().strftime(self.time_format),
+            "version": self.project_version,
+        }
+
+        system_info = {
+            "description": self.description,
+            "notes": self.notes,
+            "training_device": {
+                "os": f"{platform.system()} {platform.release()}",
+                "cpu": platform.processor(),
+                "gpu": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU only",
+                "ram": f"{round(psutil.virtual_memory().total / (1024**3), 2)} GB",
+                "python_version": platform.python_version()
+            }
+        }
+
+        csv_files = [f for f in os.listdir(self.input_folder) if f.endswith('.csv')]
+        total_rows = 0
+        for f in csv_files:
+            with open(self.input_folder / f, "r", encoding="utf-8") as file:
+                total_rows += sum(1 for _ in file) - 1
+
+        dataset_info = {
+            "source_files": csv_files,
+            "total_rows": total_rows,
+            "input_features": self.input_col,
+            "output_features": self.output_col,
+            "scaling_source": str(self.scale_path)
+        }
+
+        scaling_info = {
+            "reference_zip": str(self.scale_path),
+            "method": type(self.scaler_input).__name__,
+            "metadata_from_zip": self.scaling_loader.metadata
+        }
+
+        preprocessing_info = {
+            "sequence_size": self.sequence_size,
+            "chunksize": self.chunksize,
+            "allow_padding": self.allow_padding,
+            "pad_value": self.pad_value,
+            "num_workers": self.num_workers
+        }
+
+        data_structure = {
+            "input_columns": self.input_col,
+            "output_columns": self.output_col,
+            "input_shape": [self.sequence_size, len(self.input_col)],
+            "output_shape": [len(self.output_col)]
+        }
+
+        return {
+            "project_info": project_info,
+            "system_info": system_info,
+            "dataset": dataset_info,
+            "scaling": scaling_info,
+            "preprocessing": preprocessing_info,
+            "data_structure": data_structure
+        }
+
+    # ----------------------------------------------------------------------
+    def save_metadata(self):
+        """Save metadata as a YAML file in the output directory."""
+        metadata_path = self.output_folder / f"metadata_{self.name_project}.yaml"
+        with open(metadata_path, "w", encoding="utf-8") as f:
+            yaml.dump(self.metadata, f, allow_unicode=True, sort_keys=False)
+        print(f"[INFO] Metadata saved to: {metadata_path}")
+        return metadata_path
+
+    # ----------------------------------------------------------------------
+    def package_to_zip(self, metadata_path, cleanup=True):
+        """
+        Package all .pt and metadata files into a single ZIP archive.
+        Optionally remove source files after zipping to save space.
+
+        Args:
+            metadata_path (Path): Path to the metadata YAML file.
+            cleanup (bool): If True, delete .pt and metadata files after zipping.
+        """
+        zip_filename = self.output_folder / f"{self.name_project}_dataset_package.zip"
+
+        # Collect all .pt files
+        pt_files = list(self.output_folder.glob("*.pt"))
+
+        with zipfile.ZipFile(zip_filename, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            # Add .pt files
+            for pt_file in pt_files:
+                zipf.write(pt_file, pt_file.name)
+
+            # Add metadata.yaml inside zip
+            zipf.write(metadata_path, metadata_path.name)
+
+        print(f"[INFO] Dataset and metadata zipped to: {zip_filename}")
+
+        # Optional cleanup: remove all .pt and metadata files
+        if cleanup:
+            for pt_file in pt_files:
+                try:
+                    os.remove(pt_file)
+                except Exception as e:
+                    print(f"[WARNING] Could not delete {pt_file}: {e}")
+
+            try:
+                os.remove(metadata_path)
+            except Exception as e:
+                print(f"[WARNING] Could not delete metadata: {e}")
+
+            print(f"[INFO] Cleaned up {len(pt_files)} .pt files and metadata after zipping.")
+
+        return zip_filename
+
 
 # =============================================================================
 # RUN EXAMPLE
 # =============================================================================
 if __name__ == "__main__":
+
+    ZIP_NAME_SCALER = "Test_scale1_scalers.zip"
+    INPUT_COLUMN = ['DATA_INPUT']
+    OUTPUT_COULMN = ['DATA_OUTPUT']
+    SEQUENCE_SIZE = 10
+    CHUNKSIZE = 20000
+    CORE_CPU = 6
+
+    ROOT_DIR = Path(__file__).resolve().parents[2]
+    FOLDER_DATA = ROOT_DIR / "data" / "raw"
+    FOLDER_DATA_PROCESSED = ROOT_DIR / "data" / "processed"
+    FOLDER_SAVE_SCALE = ROOT_DIR / "config" / ZIP_NAME_SCALER
+
     converter = convert_csv2pt(
-        input_folder=r"D:\Project_end\New_world\my_project\data\raw",
-        output_folder=r"D:\Project_end\New_world\my_project\data\processed",
-        scale_path=r"D:\Project_end\New_world\my_project\config\Test_scale1_scalers.zip",
-        input_col=['DATA_INPUT'],
-        output_col=['DATA_OUTPUT'],
-        sequence_size=10,
-        chunksize=200000,
-        num_workers=6,
+        input_folder=FOLDER_DATA,
+        output_folder=FOLDER_DATA_PROCESSED,
+        scale_path=FOLDER_SAVE_SCALE,
+        input_col=INPUT_COLUMN,
+        output_col=OUTPUT_COULMN,
+        sequence_size=SEQUENCE_SIZE,
+        chunksize=CHUNKSIZE,
+        num_workers=CORE_CPU,
+        user_create="My",
+        name_project="RC_Tank_Preprocessing",
+        description="Convert RC Tank raw signals into PT tensors using global scalers",
+        notes="Dataset prepared for supervised learning model training."
     )
 
     converter.process_all()
