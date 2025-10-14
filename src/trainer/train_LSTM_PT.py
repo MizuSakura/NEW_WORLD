@@ -16,6 +16,38 @@ import matplotlib.pyplot as plt
 import os
 import time
 from tqdm import tqdm
+import zipfile
+from pathlib import Path
+import shutil
+
+def unpack_dataset_zip(zip_path, target_folder, cleanup=False):
+    """
+    Unpack dataset zip to a specified folder.
+    
+    Args:
+        zip_path (str | Path): Path to the zip file.
+        target_folder (str | Path): Folder where files will be extracted.
+        cleanup (bool): If True, remove the zip file after extraction.
+        
+    Returns:
+        Path: Path to the folder with extracted files.
+    """
+    zip_path = Path(zip_path)
+    target_folder = Path(target_folder)
+    target_folder.mkdir(parents=True, exist_ok=True)
+
+    with zipfile.ZipFile(zip_path, 'r') as zipf:
+        zipf.extractall(target_folder)
+    print(f"[INFO] Dataset extracted to: {target_folder}")
+
+    if cleanup:
+        try:
+            os.remove(zip_path)
+            print(f"[INFO] Original zip file {zip_path.name} removed.")
+        except Exception as e:
+            print(f"[WARNING] Could not remove zip file: {e}")
+
+    return target_folder
 
 torch.backends.cudnn.benchmark = True  # ⚡ GPU speedup for fixed-size inputs
 
@@ -34,7 +66,8 @@ class TRAIN_MODEL_PT:
                  num_layers=2,
                  lr=1e-3,
                  num_epochs=100,
-                 patience=20,
+                 patience=20,num_worker=0,
+                 prefetch_factor=2,
                  device=None):
 
         self.data_folder = Path(data_folder)
@@ -49,6 +82,8 @@ class TRAIN_MODEL_PT:
         self.lr = lr
         self.num_epochs = num_epochs
         self.patience = patience
+        self.num_worker  = num_worker
+        self.prefetch_factor = prefetch_factor
         self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         # Internal components
@@ -70,8 +105,8 @@ class TRAIN_MODEL_PT:
             print("[INFO] Using PTLazyChunkedSequenceDataset (lazy load)")
             self.dataset = PTLazyChunkedSequenceDataset(self.data_folder)
 
-        num_workers = 1
-        prefetch_factor = 4 if num_workers > 0 else None
+        num_workers =  self.num_worker
+        prefetch_factor = self.prefetch_factor if num_workers > 0 else None
         pin_memory = torch.cuda.is_available()
         persistent_workers = True if num_workers > 0 else False
 
@@ -204,19 +239,47 @@ class TRAIN_MODEL_PT:
 # 🔹 ENTRY POINT
 # ======================================================================
 if __name__ == "__main__":
+
+    #USER  CUSTOM
+    FILE_NAME = "RC_Tank_Preprocessing_dataset_package.zip"
+    FILE_NAME_MODEL = "lstm_model.pth"
+    TYPE_OF_DATASET = "lazy"      # "full" or "lazy"
+    TYPE_OF_MODEL = "DeepLSTM"     # choose: "VanillaLSTM", "DeepLSTM", "BiLSTM"
+    #HYPERPARAMETER
+    BATCH_SIZE = 1024
+    HIDDEN_LAYER = 128
+    NUM_LAYERS = 2
+    LEARNING_RATE = 0.001
+    EPOCHS = 10
+    PATIENCE = 10
+    CORE_CPU = 1
+    FUTURE_DATA = 2
+
+    
+    #RELATIVE PATH
+    ROOT_DIR = Path(__file__).resolve().parents[2]
+    FILE_ZIP_DATA = ROOT_DIR / "data" / "processed" / FILE_NAME
+    TEMPORALY_FOLDER = ROOT_DIR / "data" / "temporaly"
+    PATH_SAVE_MODEL = ROOT_DIR / "models" / FILE_NAME_MODEL
+    DATA_FOLDER = unpack_dataset_zip(FILE_ZIP_DATA,TEMPORALY_FOLDER)
+
     trainer = TRAIN_MODEL_PT(
-        data_folder=r"D:\Project_end\New_world\my_project\data\processed",  # folder containing .pt files
-        model_save_path=r"D:\Project_end\New_world\my_project\models\lstm_model_pt.pth",
-        dataset_type="lazy",       # "full" or "lazy"
-        model_type="DeepLSTM",     # choose: "VanillaLSTM", "DeepLSTM", "BiLSTM"
-        batch_size=1024,
-        hidden_dim=128,
-        num_layers=2,
-        lr=1e-3,
-        num_epochs=50,
-        patience=10,
+        data_folder = DATA_FOLDER,
+        model_save_path = PATH_SAVE_MODEL,
+        dataset_type = TYPE_OF_DATASET, 
+        model_type=TYPE_OF_MODEL,
+        batch_size=BATCH_SIZE,
+        hidden_dim=HIDDEN_LAYER,
+        num_layers=NUM_LAYERS,
+        lr=LEARNING_RATE,
+        num_epochs=EPOCHS,
+        patience=PATIENCE,
+        num_worker= CORE_CPU,
+        prefetch_factor= FUTURE_DATA
     )
 
     trainer.prepare_data()
     trainer.build_model()
     trainer.train()
+    shutil.rmtree(TEMPORALY_FOLDER)
+    print(f"[INFO] Temporary extracted dataset folder removed: {TEMPORALY_FOLDER}")
