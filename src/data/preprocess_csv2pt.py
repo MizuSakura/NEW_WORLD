@@ -199,7 +199,7 @@ class convert_csv2pt:
         scaling_info = {
             "reference_zip": str(self.scale_path),
             "method": type(self.scaler_input).__name__,
-            "metadata_from_zip": self.scaling_loader.metadata
+            "metadata_from_zip": self.scaling_loader.metadata['scaling']
         }
 
         preprocessing_info = {
@@ -231,49 +231,68 @@ class convert_csv2pt:
         """Save metadata as a YAML file in the output directory."""
         metadata_path = self.output_folder / f"metadata_{self.name_project}.yaml"
         with open(metadata_path, "w", encoding="utf-8") as f:
-            yaml.dump(self.metadata, f, allow_unicode=True, sort_keys=False)
+            yaml.dump(self.metadata, f, 
+                      default_flow_style=False,
+                      allow_unicode=True, 
+                      sort_keys=False)      
         print(f"[INFO] Metadata saved to: {metadata_path}")
         return metadata_path
 
     # ----------------------------------------------------------------------
     def package_to_zip(self, metadata_path, cleanup=True):
         """
-        Package all .pt and metadata files into a single ZIP archive.
+        Package all .pt files, metadata, and scalers into a single ZIP archive.
         Optionally remove source files after zipping to save space.
-
-        Args:
-            metadata_path (Path): Path to the metadata YAML file.
-            cleanup (bool): If True, delete .pt and metadata files after zipping.
         """
         zip_filename = self.output_folder / f"{self.name_project}_dataset_package.zip"
-
-        # Collect all .pt files
         pt_files = list(self.output_folder.glob("*.pt"))
+        
+        if not pt_files:
+            print("[WARNING] No .pt files were generated to package.")
+            return None
 
         with zipfile.ZipFile(zip_filename, 'w', zipfile.ZIP_DEFLATED) as zipf:
             # Add .pt files
+            print(f"[INFO] Adding {len(pt_files)} .pt files to zip...")
             for pt_file in pt_files:
                 zipf.write(pt_file, pt_file.name)
 
-            # Add metadata.yaml inside zip
-            zipf.write(metadata_path, metadata_path.name)
+            # Add metadata.yaml
+            if metadata_path.exists():
+                print("[INFO] Adding metadata file to zip...")
+                zipf.write(metadata_path, metadata_path.name)
 
-        print(f"[INFO] Dataset and metadata zipped to: {zip_filename}")
-
-        # Optional cleanup: remove all .pt and metadata files
-        if cleanup:
-            for pt_file in pt_files:
-                try:
-                    os.remove(pt_file)
-                except Exception as e:
-                    print(f"[WARNING] Could not delete {pt_file}: {e}")
-
+            # MODIFIED: Add scaler .pkl files from the source zip
+            print("[INFO] Adding scaler .pkl files to zip...")
             try:
-                os.remove(metadata_path)
+                with zipfile.ZipFile(self.scale_path, 'r') as source_zip:
+                    scaler_files = ['input_scaler.pkl', 'output_scaler.pkl']
+                    for s_file in scaler_files:
+                        if s_file in source_zip.namelist():
+                            scaler_data = source_zip.read(s_file)
+                            zipf.writestr(s_file, scaler_data)
+                            print(f"  -> Added {s_file}")
+                        else:
+                            print(f"[WARNING] '{s_file}' not found in source zip.")
+            except FileNotFoundError:
+                print(f"[ERROR] Source scaler zip not found: {self.scale_path}")
             except Exception as e:
-                print(f"[WARNING] Could not delete metadata: {e}")
+                print(f"[ERROR] Failed to add scaler files: {e}")
 
-            print(f"[INFO] Cleaned up {len(pt_files)} .pt files and metadata after zipping.")
+
+        print(f"[SUCCESS] Dataset and metadata zipped to: {zip_filename}")
+
+        # Optional cleanup
+        if cleanup:
+            print("[INFO] Cleaning up intermediate files...")
+            files_to_clean = pt_files + [metadata_path]
+            for file_path in files_to_clean:
+                try:
+                    if file_path.exists():
+                        os.remove(file_path)
+                except Exception as e:
+                    print(f"[WARNING] Could not delete {file_path.name}: {e}")
+            print("[INFO] Cleanup complete.")
 
         return zip_filename
 
@@ -304,7 +323,7 @@ if __name__ == "__main__":
         sequence_size=SEQUENCE_SIZE,
         chunksize=CHUNKSIZE,
         num_workers=CORE_CPU,
-        user_create="My",
+        user_create="what",
         name_project="RC_Tank_Preprocessing",
         description="Convert RC Tank raw signals into PT tensors using global scalers",
         notes="Dataset prepared for supervised learning model training."
