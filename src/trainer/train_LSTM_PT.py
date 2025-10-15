@@ -18,6 +18,8 @@ import time
 from tqdm import tqdm
 import zipfile
 import shutil
+from datetime import datetime ## MODIFIED: Added for timestamping
+import yaml                 ## MODIFIED: Added for reading dataset metadata
 
 # Optional data engines
 import pandas as pd
@@ -56,12 +58,14 @@ class TRAIN_MODEL_PT:
                  data_folder,
                  model_save_path,
                  result_folder,
+                 dataset_zip_path,     ## MODIFIED: Added to store path to original zip
                  dataset_type="lazy",
                  model_type="DeepLSTM",
                  batch_size=1024,
                  hidden_dim=128,
                  num_layers=2,
                  lr=1e-3,
+                 fc_units=[64, 32],
                  num_epochs=100,
                  patience=20,
                  num_worker=0,
@@ -72,6 +76,7 @@ class TRAIN_MODEL_PT:
         self.model_save_path = Path(model_save_path)
         self.result_folder = Path(result_folder)
         self.result_folder.mkdir(parents=True, exist_ok=True)
+        self.dataset_zip_path = Path(dataset_zip_path) ## MODIFIED: Store zip path for checkpointing
 
         self.dataset_type = dataset_type
         self.model_type = model_type
@@ -79,6 +84,7 @@ class TRAIN_MODEL_PT:
         self.hidden_dim = hidden_dim
         self.num_layers = num_layers
         self.lr = lr
+        self.fc_units = fc_units
         self.num_epochs = num_epochs
         self.patience = patience
         self.num_worker = num_worker
@@ -95,6 +101,14 @@ class TRAIN_MODEL_PT:
         self.optimizer = None
         self.logger = Logger()
 
+        ## MODIFIED: Attributes for comprehensive checkpointing
+        self.input_dim = None
+        self.output_dim = None
+        self.sequence_size = None
+        self.scaler_metadata = None
+        
+
+
     # ==============================================================
     # 🔸 Dataset
     # ==============================================================
@@ -104,6 +118,20 @@ class TRAIN_MODEL_PT:
         else:
             self.dataset = PTLazyChunkedSequenceDataset(self.data_folder)
         print(f"[INFO] Loaded dataset: {len(self.dataset)} samples")
+
+        ## MODIFIED: Load metadata from the dataset's YAML for checkpointing
+        try:
+            metadata_file = next(self.data_folder.glob("metadata_*.yaml"))
+            with open(metadata_file, 'r', encoding='utf-8') as f:
+                metadata = yaml.safe_load(f)
+            self.sequence_size = metadata.get('preprocessing', {}).get('sequence_size', -1)
+            self.scaler_metadata = metadata.get('scaling', {})
+            print(f"[INFO] Loaded metadata from {metadata_file.name}. Sequence size: {self.sequence_size}")
+        except (StopIteration, FileNotFoundError):
+            print("[WARNING] Could not find metadata YAML. Checkpoint will have incomplete info.")
+        except Exception as e:
+            print(f"[WARNING] Error loading metadata: {e}. Checkpoint will have incomplete info.")
+
 
     # ==============================================================
     # 🔸 Split into Train/Val/Test
@@ -138,17 +166,19 @@ class TRAIN_MODEL_PT:
     # ==============================================================
     def build_model(self):
         x0, y0 = self.dataset[0]
-        in_dim, out_dim = x0.shape[-1], y0.shape[-1] if y0.ndim > 0 else 1
+        self.input_dim = x0.shape[-1]
+        self.output_dim = y0.shape[-1] if y0.ndim > 0 else 1
+
         if self.model_type == "VanillaLSTM":
-            self.model = VanillaLSTM_MODEL(in_dim, self.hidden_dim, self.num_layers, out_dim)
+            self.model = VanillaLSTM_MODEL(self.input_dim, self.hidden_dim, self.num_layers, self.output_dim, fc_units=self.fc_units)
         elif self.model_type == "DeepLSTM":
-            self.model = DeepLSTM_MODEL(in_dim, self.hidden_dim, self.num_layers, out_dim)
+            self.model = DeepLSTM_MODEL(self.input_dim, self.hidden_dim, self.num_layers, self.output_dim, fc_units=self.fc_units)
         else:
-            self.model = BiLSTM_MODEL(in_dim, self.hidden_dim, self.num_layers, out_dim)
+            self.model = BiLSTM_MODEL(self.input_dim, self.hidden_dim, self.num_layers, self.output_dim, fc_units=self.fc_units)
+
         self.model.to(self.device)
         self.optimizer = optim.Adam(self.model.parameters(), lr=self.lr)
-        print(f"[MODEL] {self.model_type} created ({in_dim}->{out_dim})")
-
+        print(f"[MODEL] {self.model_type} created ({self.input_dim}->{self.output_dim}) | FC Units: {self.fc_units}")
     # ==============================================================
     # 🔸 Train
     # ==============================================================
@@ -184,7 +214,7 @@ class TRAIN_MODEL_PT:
                     val_total += self.loss_fn(pred, yb).item()
             avg_val = val_total / len(self.val_loader)
             val_losses.append(avg_val)
-            tqdm.write(f"Epoch {epoch:03d} | Train {avg_tr:.6f} | Val {avg_val:.6f}")
+            tqdm.write(f"Epoch {epoch:03d} | Train Loss: {avg_tr:.6f} | Val Loss: {avg_val:.6f}")
 
             # Early stop
             if avg_val < best_loss:
@@ -194,35 +224,61 @@ class TRAIN_MODEL_PT:
             else:
                 patience_counter += 1
                 if patience_counter >= self.patience:
-                    print(f"[STOP] Early stopping (no improvement {self.patience} epochs)")
+                    print(f"[STOP] Early stopping triggered after {self.patience} epochs without improvement.")
                     break
-
+        
+        ## MODIFIED: Save the best model using the comprehensive checkpoint format
         if best_state:
-            self.model.load_state_dict(best_state)
-            torch.save(self.model.state_dict(), self.model_save_path)
-            print(f"[SAVE] Best model → {self.model_save_path}")
+            self.model.load_state_dict(best_state) # Load best model state before saving
+            checkpoint = {
+                "model_state_dict": self.model.state_dict(),
+                "optimizer_state_dict": self.optimizer.state_dict(),
+                "model_type": self.model_type,
+                "input_dim": self.input_dim,
+                "output_dim": self.output_dim,
+                "hidden_dim": self.hidden_dim,
+                "num_layers": self.num_layers,
+                "sequence_size": self.sequence_size,
+                "scaling_zip": str(self.dataset_zip_path),
+                "scaler_metadata": self.scaler_metadata,
+                "train_losses": tr_losses,
+                "val_losses": val_losses,
+                "learning_rate": self.lr,
+                "batch_size": self.batch_size,
+                "fc_units": self.fc_units,
+                "epochs": epoch, # Save the actual number of epochs run
+                "torch_version": torch.__version__,
+                "device": str(self.device),
+                "timestamp": datetime.now().isoformat()
+            }
+            torch.save(checkpoint, self.model_save_path)
+            print(f"[SAVE] Best model checkpoint saved to → {self.model_save_path}")
+        else:
+            print("[WARNING] Training did not improve. No model was saved.")
+
         self.plot_loss(tr_losses, val_losses)
+
 
     def plot_loss(self, tr, val):
         plt.figure(figsize=(7, 4))
-        plt.plot(tr, label='Train')
-        plt.plot(val, label='Val')
-        plt.title('Loss Curve')
+        plt.plot(tr, label='Train Loss')
+        plt.plot(val, label='Validation Loss')
+        plt.title('Model Loss Curve')
         plt.xlabel('Epoch')
-        plt.ylabel('MSE')
+        plt.ylabel('MSE Loss')
         plt.grid(True)
         plt.legend()
         plt.tight_layout()
         plt.show()
 
     # ==============================================================
-    # 🔸 Evaluate and Log Result (YOLO-style)
+    # 🔸 Evaluate and Log Result
     # ==============================================================
     def evaluate_test(self):
         self.model.eval()
         y_true, y_pred = [], []
         with torch.no_grad():
-            for xb, yb in self.test_loader:
+            for xb, yb in tqdm(self.test_loader, desc="Testing", leave=False):
                 xb, yb = xb.to(self.device).float(), yb.to(self.device).float()
                 pred = self.model(xb)
                 y_true.append(yb.cpu().numpy())
@@ -248,9 +304,9 @@ class TRAIN_MODEL_PT:
             df.to_csv(result_file, index=False)
 
         plt.figure(figsize=(10, 5))
-        plt.plot(y_true[:500], label="True")
-        plt.plot(y_pred[:500], label="Pred")
-        plt.title("Test Prediction (Sample 500)")
+        plt.plot(y_true[:500], label="True Values", alpha=0.8)
+        plt.plot(y_pred[:500], label="Predictions", linestyle='--')
+        plt.title("Test Set: True vs. Predicted Values (Sample of 500)")
         plt.legend()
         plt.grid(True)
         plt.show()
@@ -261,7 +317,7 @@ class TRAIN_MODEL_PT:
 if __name__ == "__main__":
     FILE_NAME = "RC_Tank_Preprocessing_dataset_package.zip"
     FILE_MODEL = "lstm_model.pth"
-    SAVE_ENGINE = "pyarrow"  # ⬅️ หรือ "pandas"
+    SAVE_ENGINE = "pyarrow"  # or "pandas"
 
     ROOT = Path(__file__).resolve().parents[2]
     ZIP_PATH = ROOT / "data" / "processed" / FILE_NAME
@@ -275,6 +331,7 @@ if __name__ == "__main__":
         data_folder=data_dir,
         model_save_path=MODEL_PATH,
         result_folder=RESULT_DIR,
+        dataset_zip_path=ZIP_PATH, ## MODIFIED: Pass the original zip path
         dataset_type="lazy",
         model_type="DeepLSTM",
         batch_size=1024,
