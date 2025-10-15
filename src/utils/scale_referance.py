@@ -315,7 +315,7 @@ if __name__ == "__main__":
     FOLDER_SAVE_SCALE = ROOT_DIR / "config" 
     DATASET_NAME = "Test_scale1"
 
-    INPUT_FEATURES = ["DATA_INPUT"]
+    INPUT_FEATURES = ["DATA_INPUT","DATA_OUTPUT"]
     OUTPUT_FEATURES = ["DATA_OUTPUT"]
 
     SCALER_TYPE = "MinMaxScaler"
