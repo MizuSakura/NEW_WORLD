@@ -104,7 +104,7 @@ if __name__ == "__main__":
     # ------------------------
     TIME_SIM = 300
     DT = 0.01
-    DT_LOG = 0.1
+    DT_LOG = 0.01
     SETPOINT = 5.0
     MAX_VOLT = 24
     MAX_CURR = 3
