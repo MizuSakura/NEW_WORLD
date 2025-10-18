@@ -313,7 +313,7 @@ if __name__ == "__main__":
     ROOT_DIR = Path(__file__).resolve().parents[2]  
     FOLDER_DATA = ROOT_DIR / "data" / "raw"        
     FOLDER_SAVE_SCALE = ROOT_DIR / "config" 
-    DATASET_NAME = "Test_scale1"
+    DATASET_NAME = "Test1"
 
     INPUT_FEATURES = ["DATA_INPUT","DATA_OUTPUT"]
     OUTPUT_FEATURES = ["DATA_OUTPUT"]
