@@ -1,4 +1,13 @@
 # src/data/preprocess_csv2pt.py
+# =============================================================================
+# ⚙️ CONVERT CSV → PT DATASET WITH SCALING + SEQUENCE CREATION
+# =============================================================================
+# This script converts large CSV datasets into PyTorch tensor files (.pt),
+# performing scaling (using pre-saved scalers) and sequence creation for
+# supervised ML or time-series training.
+# Includes automatic metadata and packaging into a single ZIP.
+# =============================================================================
+
 from src.data.scaling_loader import ScalingZipLoader
 from pathlib import Path
 import torch
@@ -75,6 +84,7 @@ class convert_csv2pt:
             convert_options=convert_opts
         )
 
+        # Limit to chunk size
         table = table.slice(0, self.chunksize)
         return table.to_pandas()
 
@@ -82,13 +92,16 @@ class convert_csv2pt:
     def _process_file(self, file_name):
         """Process a single CSV file: read, scale, and convert to PT."""
         file_path = self.input_folder / file_name
-        total_rows = sum(1 for _ in open(file_path)) - 1
-        num_chunks = max(1, total_rows // self.chunksize)
+        total_rows = sum(1 for _ in open(file_path)) - 1  # assume header
+        num_chunks = int(np.ceil(total_rows / self.chunksize))  # ✅ fixed
 
         X_total, y_total = [], []
         for i in range(num_chunks):
             start = i * self.chunksize
             df = self._read_chunk(file_path, start)
+
+            if df.empty:
+                continue
 
             X_data = df[self.input_col].to_numpy()
             y_data = df[self.output_col].to_numpy()
@@ -104,9 +117,16 @@ class convert_csv2pt:
 
             # Sequence creation
             X_seq, y_seq = self.create_sequences(X_scaled, y_scaled)
-            if len(X_seq) > 0:
-                X_total.append(X_seq)
-                y_total.append(y_seq)
+
+            if len(X_seq) == 0:
+                continue  # ✅ skip if no valid sequence created
+
+            X_total.append(X_seq)
+            y_total.append(y_seq)
+
+        if not X_total:
+            print(f"[WARNING] No sequences created for {file_name}")
+            return None
 
         X_total = np.vstack(X_total)
         y_total = np.vstack(y_total)
@@ -124,12 +144,17 @@ class convert_csv2pt:
         Xs, ys = [], []
         n = len(X_data)
 
-        if n < self.sequence_size and self.allow_padding:
-            X_pad = self.pad_or_truncate(X_data)
-            y_pad = self.pad_or_truncate(y_data)
-            return np.array([X_pad]), np.array([y_pad[-1]])
+        # ✅ Handle case: sequence shorter than required
+        if n < self.sequence_size:
+            if self.allow_padding:
+                X_pad = self.pad_or_truncate(X_data)
+                y_pad = self.pad_or_truncate(y_data)
+                return np.array([X_pad]), np.array([y_pad[-1]])
+            else:
+                return np.array([]), np.array([])
 
-        for i in range(max(0, n - self.sequence_size)):
+        # ✅ Fixed: include the last valid sequence
+        for i in range(max(0, n - self.sequence_size + 1)):
             Xs.append(X_data[i:i + self.sequence_size])
             ys.append(y_data[i + self.sequence_size - 1])
         return np.array(Xs), np.array(ys)
@@ -150,6 +175,10 @@ class convert_csv2pt:
         """Convert all CSV files in input folder to PT format."""
         csv_files = [f for f in os.listdir(self.input_folder) if f.endswith('.csv')]
         print(f"[INFO] Found {len(csv_files)} CSV files")
+
+        if len(csv_files) == 0:
+            print("[WARNING] No CSV files found. Nothing to process.")
+            return
 
         with mp.Pool(self.num_workers) as pool:
             list(tqdm(pool.imap(self._process_file, csv_files),
@@ -186,7 +215,7 @@ class convert_csv2pt:
         total_rows = 0
         for f in csv_files:
             with open(self.input_folder / f, "r", encoding="utf-8") as file:
-                total_rows += sum(1 for _ in file) - 1
+                total_rows += sum(1 for _ in file) - 1  # assume header
 
         dataset_info = {
             "source_files": csv_files,
@@ -262,7 +291,7 @@ class convert_csv2pt:
                 print("[INFO] Adding metadata file to zip...")
                 zipf.write(metadata_path, metadata_path.name)
 
-            # MODIFIED: Add scaler .pkl files from the source zip
+            # Add scaler .pkl files from the source zip
             print("[INFO] Adding scaler .pkl files to zip...")
             try:
                 with zipfile.ZipFile(self.scale_path, 'r') as source_zip:
@@ -278,7 +307,6 @@ class convert_csv2pt:
                 print(f"[ERROR] Source scaler zip not found: {self.scale_path}")
             except Exception as e:
                 print(f"[ERROR] Failed to add scaler files: {e}")
-
 
         print(f"[SUCCESS] Dataset and metadata zipped to: {zip_filename}")
 
@@ -302,10 +330,10 @@ class convert_csv2pt:
 # =============================================================================
 if __name__ == "__main__":
 
-    ZIP_NAME_SCALER = "Test_scale1_scalers.zip"
-    INPUT_COLUMN = ['DATA_INPUT',"DATA_OUTPUT"]
+    ZIP_NAME_SCALER = "Test1_scalers.zip"
+    INPUT_COLUMN = ['DATA_INPUT', "DATA_OUTPUT"]
     OUTPUT_COULMN = ['DATA_OUTPUT']
-    SEQUENCE_SIZE = 10
+    SEQUENCE_SIZE = 100
     CHUNKSIZE = 20000
     CORE_CPU = 6
 
@@ -324,7 +352,7 @@ if __name__ == "__main__":
         chunksize=CHUNKSIZE,
         num_workers=CORE_CPU,
         user_create="what",
-        name_project="RC_Tank_Preprocessing",
+        name_project="test2",
         description="Convert RC Tank raw signals into PT tensors using global scalers",
         notes="Dataset prepared for supervised learning model training."
     )
