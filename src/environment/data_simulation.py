@@ -103,7 +103,7 @@ if __name__ == "__main__":
     # Simulation Configuration
     # ------------------------
     TIME_SIM = 300
-    DT = 0.01
+    DT = 0.1
     DT_LOG = 0.01
     SETPOINT = 5.0
     MAX_VOLT = 24
@@ -134,9 +134,9 @@ if __name__ == "__main__":
     # ------------------------
     # Run according to signal type
     # ------------------------
-    freq_list = [0.001,0.01,0.1,1,2]
+    freq_list = [0.01]
     if signal_type == 'pwm':
-        duty_list = [0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1]
+        duty_list = [0.5]
         
         for duty in duty_list:
             for freq in freq_list:
