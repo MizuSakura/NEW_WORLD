@@ -1,11 +1,12 @@
 # src/data/preprocess_csv2pt.py
 # =============================================================================
-# ⚙️ CONVERT CSV → PT DATASET WITH SCALING + SEQUENCE CREATION
+# ⚙️ CONVERT CSV → PT DATASET WITH SCALING + SEQUENCE CREATION (with delay support)
 # =============================================================================
 # This script converts large CSV datasets into PyTorch tensor files (.pt),
 # performing scaling (using pre-saved scalers) and sequence creation for
 # supervised ML or time-series training.
-# Includes automatic metadata and packaging into a single ZIP.
+# Includes optional time delay, step size, automatic metadata,
+# and packaging into a single ZIP.
 # =============================================================================
 
 from src.data.scaling_loader import ScalingZipLoader
@@ -27,13 +28,14 @@ import zipfile
 class convert_csv2pt:
     """
     Convert large CSV datasets into .pt format for ML preprocessing.
-    Includes scaling (via loaded scalers), sequence creation, and
-    metadata generation for reproducibility and traceability.
+    Includes scaling (via loaded scalers), sequence creation with delay,
+    and metadata generation for reproducibility and traceability.
     """
 
     def __init__(self, input_folder, output_folder, scale_path,
-                 input_col, output_col, sequence_size=10, chunksize=100000,
-                 num_workers=4, allow_padding=True, pad_value=0.0,
+                 input_col, output_col, sequence_size=10, delay=1, step_size=1,
+                 chunksize=100000, num_workers=4,
+                 allow_padding=True, pad_value=0.0,
                  user_create=None, name_project=None,
                  time_format="%Y-%m-%d %H:%M:%S",
                  project_version="1.0.0",
@@ -47,6 +49,8 @@ class convert_csv2pt:
         self.input_col = input_col
         self.output_col = output_col
         self.sequence_size = sequence_size
+        self.delay = delay
+        self.step_size = step_size
         self.chunksize = chunksize
         self.num_workers = num_workers
         self.allow_padding = allow_padding
@@ -76,15 +80,12 @@ class convert_csv2pt:
         read_opts = pv.ReadOptions(skip_rows=skip_rows, autogenerate_column_names=False)
         parse_opts = pv.ParseOptions(delimiter=',')
         convert_opts = pv.ConvertOptions()
-
         table = pv.read_csv(
             file_path,
             read_options=read_opts,
             parse_options=parse_opts,
             convert_options=convert_opts
-        )
-
-        # Limit to chunk size
+            )
         table = table.slice(0, self.chunksize)
         return table.to_pandas()
 
@@ -93,19 +94,17 @@ class convert_csv2pt:
         """Process a single CSV file: read, scale, and convert to PT."""
         file_path = self.input_folder / file_name
         total_rows = sum(1 for _ in open(file_path)) - 1  # assume header
-        num_chunks = int(np.ceil(total_rows / self.chunksize))  # ✅ fixed
+        num_chunks = int(np.ceil(total_rows / self.chunksize))
 
         X_total, y_total = [], []
         for i in range(num_chunks):
             start = i * self.chunksize
             df = self._read_chunk(file_path, start)
-
             if df.empty:
                 continue
 
             X_data = df[self.input_col].to_numpy()
             y_data = df[self.output_col].to_numpy()
-
             if X_data.ndim == 1:
                 X_data = X_data.reshape(-1, 1)
             if y_data.ndim == 1:
@@ -115,11 +114,12 @@ class convert_csv2pt:
             X_scaled = self.scaler_input.transform(X_data)
             y_scaled = self.scaler_output.transform(y_data)
 
-            # Sequence creation
-            X_seq, y_seq = self.create_sequences(X_scaled, y_scaled)
-
+            # Sequence creation with delay
+            X_seq, y_seq = self.create_sequences(X_scaled, y_scaled,
+                                                 delay=self.delay,
+                                                 step_size=self.step_size)
             if len(X_seq) == 0:
-                continue  # ✅ skip if no valid sequence created
+                continue
 
             X_total.append(X_seq)
             y_total.append(y_seq)
@@ -139,24 +139,26 @@ class convert_csv2pt:
         return file_name
 
     # ----------------------------------------------------------------------
-    def create_sequences(self, X_data, y_data):
-        """Create time-series sequences for supervised learning."""
+    def create_sequences(self, X_data, y_data, delay=1, step_size=1):
+        """Create time-series sequences with optional delay."""
         Xs, ys = [], []
         n = len(X_data)
 
-        # ✅ Handle case: sequence shorter than required
-        if n < self.sequence_size:
+        if n < self.sequence_size + delay:
             if self.allow_padding:
                 X_pad = self.pad_or_truncate(X_data)
                 y_pad = self.pad_or_truncate(y_data)
-                return np.array([X_pad]), np.array([y_pad[-1]])
+                target_idx = min(len(y_pad) - 1, self.sequence_size - 1 + delay)
+                return np.array([X_pad]), np.array([y_pad[target_idx]])
             else:
                 return np.array([]), np.array([])
 
-        # ✅ Fixed: include the last valid sequence
-        for i in range(max(0, n - self.sequence_size + 1)):
-            Xs.append(X_data[i:i + self.sequence_size])
-            ys.append(y_data[i + self.sequence_size - 1])
+        for i in range(0, n - self.sequence_size - delay + 1, step_size):
+            X_seq = X_data[i:i + self.sequence_size]
+            y_target = y_data[i + self.sequence_size - 1 + delay]
+            Xs.append(X_seq)
+            ys.append(y_target)
+
         return np.array(Xs), np.array(ys)
 
     # ----------------------------------------------------------------------
@@ -185,7 +187,6 @@ class convert_csv2pt:
                       total=len(csv_files),
                       desc="Converting CSV → PT"))
 
-        # Save metadata and zip results
         metadata_path = self.save_metadata()
         self.package_to_zip(metadata_path, cleanup=True)
 
@@ -233,6 +234,8 @@ class convert_csv2pt:
 
         preprocessing_info = {
             "sequence_size": self.sequence_size,
+            "delay": self.delay,
+            "step_size": self.step_size,
             "chunksize": self.chunksize,
             "allow_padding": self.allow_padding,
             "pad_value": self.pad_value,
@@ -257,70 +260,52 @@ class convert_csv2pt:
 
     # ----------------------------------------------------------------------
     def save_metadata(self):
-        """Save metadata as a YAML file in the output directory."""
+        """Save metadata as YAML."""
         metadata_path = self.output_folder / f"metadata_{self.name_project}.yaml"
         with open(metadata_path, "w", encoding="utf-8") as f:
-            yaml.dump(self.metadata, f, 
+            yaml.dump(self.metadata, f,
                       default_flow_style=False,
-                      allow_unicode=True, 
-                      sort_keys=False)      
+                      allow_unicode=True,
+                      sort_keys=False)
         print(f"[INFO] Metadata saved to: {metadata_path}")
         return metadata_path
 
     # ----------------------------------------------------------------------
     def package_to_zip(self, metadata_path, cleanup=True):
-        """
-        Package all .pt files, metadata, and scalers into a single ZIP archive.
-        Optionally remove source files after zipping to save space.
-        """
+        """Package PT files, metadata, and scalers into one ZIP."""
         zip_filename = self.output_folder / f"{self.name_project}_dataset_package.zip"
         pt_files = list(self.output_folder.glob("*.pt"))
-        
         if not pt_files:
             print("[WARNING] No .pt files were generated to package.")
             return None
 
         with zipfile.ZipFile(zip_filename, 'w', zipfile.ZIP_DEFLATED) as zipf:
-            # Add .pt files
             print(f"[INFO] Adding {len(pt_files)} .pt files to zip...")
             for pt_file in pt_files:
                 zipf.write(pt_file, pt_file.name)
 
-            # Add metadata.yaml
             if metadata_path.exists():
-                print("[INFO] Adding metadata file to zip...")
                 zipf.write(metadata_path, metadata_path.name)
 
-            # Add scaler .pkl files from the source zip
-            print("[INFO] Adding scaler .pkl files to zip...")
             try:
                 with zipfile.ZipFile(self.scale_path, 'r') as source_zip:
-                    scaler_files = ['input_scaler.pkl', 'output_scaler.pkl']
-                    for s_file in scaler_files:
+                    for s_file in ['input_scaler.pkl', 'output_scaler.pkl']:
                         if s_file in source_zip.namelist():
-                            scaler_data = source_zip.read(s_file)
-                            zipf.writestr(s_file, scaler_data)
+                            zipf.writestr(s_file, source_zip.read(s_file))
                             print(f"  -> Added {s_file}")
                         else:
-                            print(f"[WARNING] '{s_file}' not found in source zip.")
-            except FileNotFoundError:
-                print(f"[ERROR] Source scaler zip not found: {self.scale_path}")
+                            print(f"[WARNING] {s_file} not found in source zip.")
             except Exception as e:
                 print(f"[ERROR] Failed to add scaler files: {e}")
 
-        print(f"[SUCCESS] Dataset and metadata zipped to: {zip_filename}")
+        print(f"[SUCCESS] Dataset packaged to: {zip_filename}")
 
-        # Optional cleanup
         if cleanup:
-            print("[INFO] Cleaning up intermediate files...")
-            files_to_clean = pt_files + [metadata_path]
-            for file_path in files_to_clean:
+            for file_path in pt_files + [metadata_path]:
                 try:
-                    if file_path.exists():
-                        os.remove(file_path)
+                    os.remove(file_path)
                 except Exception as e:
                     print(f"[WARNING] Could not delete {file_path.name}: {e}")
-            print("[INFO] Cleanup complete.")
 
         return zip_filename
 
@@ -334,6 +319,8 @@ if __name__ == "__main__":
     INPUT_COLUMN = ['DATA_INPUT', "DATA_OUTPUT"]
     OUTPUT_COULMN = ['DATA_OUTPUT']
     SEQUENCE_SIZE = 100
+    DELAY = 5          
+    STEP_SIZE = 1
     CHUNKSIZE = 20000
     CORE_CPU = 6
 
@@ -349,11 +336,13 @@ if __name__ == "__main__":
         input_col=INPUT_COLUMN,
         output_col=OUTPUT_COULMN,
         sequence_size=SEQUENCE_SIZE,
+        delay=DELAY,
+        step_size=STEP_SIZE,
         chunksize=CHUNKSIZE,
         num_workers=CORE_CPU,
         user_create="what",
         name_project="test2",
-        description="Convert RC Tank raw signals into PT tensors using global scalers",
+        description="Convert RC Tank raw signals into PT tensors with delay and step size",
         notes="Dataset prepared for supervised learning model training."
     )
 
