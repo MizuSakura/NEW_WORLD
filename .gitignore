@@ -5,7 +5,9 @@ __pycache__/
 .env
 .venv/
 SCRIPTS.PY
-
+#config
+config/
+src/data/tools/
 # Data
 /data/raw/
 /data/processed/
