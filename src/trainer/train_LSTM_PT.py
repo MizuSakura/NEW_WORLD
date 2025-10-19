@@ -28,9 +28,6 @@ from tqdm import tqdm
 # 🔹 HELPER FUNCTION TO UNPACK ZIP
 # ======================================================================
 def unpack_dataset_zip(zip_path, target_folder, cleanup=False):
-    """
-    Unpack dataset zip file to target folder.
-    """
     zip_path = Path(zip_path)
     target_folder = Path(target_folder)
     target_folder.mkdir(parents=True, exist_ok=True)
@@ -47,7 +44,6 @@ def unpack_dataset_zip(zip_path, target_folder, cleanup=False):
             print(f"[WARNING] Could not remove zip file: {e}")
 
     return target_folder
-
 
 torch.backends.cudnn.benchmark = True  # ⚡ GPU speedup
 
@@ -80,8 +76,8 @@ class TRAIN_MODEL_PT:
         self.data_folder = Path(data_folder)
         self.model_save_path = Path(model_save_path)
         self.result_folder = Path(result_folder)
-        self.result_folder.mkdir(parents=True, exist_ok=True)  # create results folder
-        self.model_save_path.parent.mkdir(parents=True, exist_ok=True)  # create models folder
+        self.result_folder.mkdir(parents=True, exist_ok=True)
+        self.model_save_path.parent.mkdir(parents=True, exist_ok=True)
         self.dataset_zip_path = Path(dataset_zip_path)
         self.backup_folder = Path(backup_folder) if backup_folder else self.model_save_path.parent / "backup"
         self.backup_folder.mkdir(parents=True, exist_ok=True)
@@ -151,11 +147,6 @@ class TRAIN_MODEL_PT:
     # 🔸 Split Dataset
     # ============================================================== 
     def split_dataset(self, train_ratio=0.7, val_ratio=0.15, test_ratio=0.15, continuous_test=False):
-        """
-        Split dataset into train/val/test.
-        Args:
-            continuous_test: If True, test set is last segment (no shuffling)
-        """
         dataset_size = len(self.dataset)
         train_size = int(train_ratio * dataset_size)
         val_size = int(val_ratio * dataset_size)
@@ -199,7 +190,6 @@ class TRAIN_MODEL_PT:
     # 🔸 Build Model
     # ============================================================== 
     def build_model(self):
-        """Initialize model and optimizer."""
         x0, y0 = self.dataset[0]
         self.input_dim = x0.shape[-1]
         self.output_dim = y0.shape[-1] if y0.ndim > 0 else 1
@@ -216,16 +206,9 @@ class TRAIN_MODEL_PT:
         print(f"[MODEL] {self.model_type} created ({self.input_dim}->{self.output_dim}) | FC Units: {self.fc_units}")
 
     # ============================================================== 
-    # 🔸 Train with single backup checkpoint
+    # 🔸 Train with backup checkpoint
     # ============================================================== 
     def train(self, backup_interval=5, resume_from=None):
-        """
-        Train model with single backup checkpoint overwrite.
-        Args:
-            backup_interval: save backup every N epochs
-            resume_from: path to checkpoint to resume from
-        """
-        # Resume training if checkpoint provided
         start_epoch = 1
         if resume_from:
             start_epoch = self.load_checkpoint(resume_from) + 1
@@ -234,8 +217,6 @@ class TRAIN_MODEL_PT:
         best_loss, patience_counter = np.inf, 0
         best_state = None
         tr_losses, val_losses = [], []
-
-        
 
         try:
             for epoch in range(start_epoch, self.num_epochs + 1):
@@ -290,7 +271,6 @@ class TRAIN_MODEL_PT:
                     print(f"[BACKUP] Temporary checkpoint saved (overwrite) → {self.backup_path}")
 
         except Exception as e:
-            # Save checkpoint if any unexpected error occurs
             torch.save({
                 "model_state_dict": self.model.state_dict(),
                 "optimizer_state_dict": self.optimizer.state_dict(),
@@ -299,7 +279,7 @@ class TRAIN_MODEL_PT:
                 "val_losses": val_losses
             }, self.backup_path)
             print(f"[CRASH] Training interrupted! Backup saved → {self.backup_path}")
-            raise e  # re-raise exception
+            raise e
 
         # Save best model at the end
         if best_state:
@@ -307,8 +287,23 @@ class TRAIN_MODEL_PT:
             torch.save({
                 "model_state_dict": best_state,
                 "optimizer_state_dict": self.optimizer.state_dict(),
+                "model_type": self.model_type,
+                "input_dim": self.input_dim,
+                "output_dim": self.output_dim,
+                "hidden_dim": self.hidden_dim,
+                "num_layers": self.num_layers,
+                "fc_units": self.fc_units,
+                "sequence_size": self.sequence_size,
+                "scaler_metadata": self.scaler_metadata,
+                "scaling_zip": str(self.dataset_zip_path),
                 "train_losses": tr_losses,
-                "val_losses": val_losses
+                "val_losses": val_losses,
+                "learning_rate": self.lr,
+                "batch_size": self.batch_size,
+                "epochs": epoch,
+                "torch_version": torch.__version__,
+                "device": str(self.device),
+                "timestamp": datetime.now().isoformat()
             }, self.model_save_path)
             print(f"[SAVE] Best model checkpoint saved → {self.model_save_path}")
         else:
@@ -317,10 +312,9 @@ class TRAIN_MODEL_PT:
         self.plot_loss(tr_losses, val_losses)
 
     # ============================================================== 
-    # 🔸 Load checkpoint (resume training)
+    # 🔸 Load checkpoint
     # ============================================================== 
     def load_checkpoint(self, path):
-        """Load checkpoint and update model, optimizer. Return last epoch."""
         checkpoint = torch.load(path, map_location=self.device)
         self.model.load_state_dict(checkpoint["model_state_dict"])
         self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
@@ -331,7 +325,7 @@ class TRAIN_MODEL_PT:
     # 🔸 Plot Loss
     # ============================================================== 
     def plot_loss(self, tr, val):
-        plt.figure(figsize=(7, 4))
+        plt.figure(figsize=(7,4))
         plt.plot(tr, label="Train Loss")
         plt.plot(val, label="Validation Loss")
         plt.title("Model Loss Curve")
@@ -346,7 +340,6 @@ class TRAIN_MODEL_PT:
     # 🔸 Evaluate Continuous Test (RC-like)
     # ============================================================== 
     def evaluate_test_continuous(self, num_plot=500):
-        """Evaluate RC-like continuous sequence and save results."""
         self.model.eval()
         x_all, y_true, y_pred = [], [], []
 
@@ -367,21 +360,15 @@ class TRAIN_MODEL_PT:
                 y_true.append(yb.cpu().numpy())
                 y_pred.append(pred.cpu().numpy())
 
-        # Concatenate batches
         x_all = np.concatenate(x_all, axis=0)
         y_true = np.concatenate(y_true, axis=0)
         y_pred = np.concatenate(y_pred, axis=0)
 
         n_features = x_all.shape[2] if x_all.ndim == 3 else 1
-        x_flat = []
-        for f_idx in range(n_features):
-            if n_features > 1:
-                x_flat.append(x_all[:, :, f_idx].flatten())
-            else:
-                x_flat.append(x_all.flatten())
-
+        x_flat = [x_all[:,:,i].flatten() if n_features>1 else x_all.flatten() for i in range(n_features)]
         y_true_flat = y_true.flatten()
         y_pred_flat = y_pred.flatten()
+
         min_len = min(len(y_true_flat), len(y_pred_flat), *[len(f) for f in x_flat])
         y_true_flat = y_true_flat[:min_len]
         y_pred_flat = y_pred_flat[:min_len]
@@ -394,18 +381,17 @@ class TRAIN_MODEL_PT:
 
         result_file = (
             self.result_folder / f"test_continuous_{self.model_type}.parquet"
-            if self.save_engine == "pyarrow"
+            if self.save_engine=="pyarrow"
             else self.result_folder / f"test_continuous_{self.model_type}.csv"
         )
         print(f"[SAVE] Writing continuous test results → {result_file}")
-        if self.save_engine == "pyarrow":
+        if self.save_engine=="pyarrow":
             table = pa.table(df)
             pa_parquet.write_table(table, result_file)
         else:
             df.to_csv(result_file, index=False)
 
-        # Plot
-        plt.figure(figsize=(12, 5))
+        plt.figure(figsize=(12,5))
         for i in range(n_features):
             plt.plot(x_flat[i][:num_plot], label=f"Input Feature {i}", alpha=0.5)
         plt.plot(y_true_flat[:num_plot], label="True y", alpha=0.8)
@@ -418,6 +404,25 @@ class TRAIN_MODEL_PT:
         plt.tight_layout()
         plt.show()
 
+        # Save continuous test metadata
+        meta_path = self.result_folder / f"test_continuous_{self.model_type}_metadata.pth"
+        torch.save({
+            "x_all": x_all,
+            "y_true": y_true,
+            "y_pred": y_pred,
+            "model_type": self.model_type,
+            "input_dim": self.input_dim,
+            "output_dim": self.output_dim,
+            "hidden_dim": self.hidden_dim,
+            "num_layers": self.num_layers,
+            "fc_units": self.fc_units,
+            "sequence_size": self.sequence_size,
+            "scaler_metadata": self.scaler_metadata,
+            "scaling_zip": str(self.dataset_zip_path),
+            "device": str(self.device),
+            "timestamp": datetime.now().isoformat()
+        }, meta_path)
+        print(f"[SAVE] Continuous test metadata saved → {meta_path}")
 
 # ============================================================== 
 # 🔹 MAIN
@@ -452,7 +457,7 @@ if __name__ == "__main__":
             hidden_dim=128,
             num_layers=2,
             lr=1e-3,
-            num_epochs=50,
+            num_epochs=100,
             patience=10,
             save_engine=SAVE_ENGINE,
             num_worker=1,
