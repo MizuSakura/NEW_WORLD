@@ -23,13 +23,14 @@ import platform
 import psutil
 import yaml
 import zipfile
-
+import joblib
 
 class convert_csv2pt:
     """
     Convert large CSV datasets into .pt format for ML preprocessing.
     Includes scaling (via loaded scalers), sequence creation with delay,
     and metadata generation for reproducibility and traceability.
+    Supports automatic column matching/subsetting for scalers.
     """
 
     def __init__(self, input_folder, output_folder, scale_path,
@@ -69,10 +70,51 @@ class convert_csv2pt:
         self.scaler_input = self.scaling_loader.scaler_in
         self.scaler_output = self.scaling_loader.scaler_out
 
-        self.output_folder.mkdir(parents=True, exist_ok=True)
-
         # Generate metadata on initialization
         self.metadata = self.generate_metadata()
+
+        # Create subset scalers to match CSV columns automatically
+        self.input_scaler_map = self.create_subset_scaler(self.input_col, self.scaler_input, 'input')
+        self.output_scaler_map = self.create_subset_scaler(self.output_col, self.scaler_output, 'output')
+
+        self.output_folder.mkdir(parents=True, exist_ok=True)
+
+    # ----------------------------------------------------------------------
+    def create_subset_scaler(self, target_cols, scaler_obj, scaler_type='input'):
+        """
+        Create a new scaler object for a subset of columns in any order.
+        Ensures that even if CSV columns are reordered or subsetted, the
+        scaling is applied correctly.
+        """
+        from sklearn.preprocessing import MinMaxScaler, StandardScaler
+        new_scaler = type(scaler_obj)()  # same class as original
+
+        meta_params = self.scaling_loader.metadata['scaling']['parameters'][scaler_type]
+
+        # Detect if MinMaxScaler or StandardScaler
+        if isinstance(scaler_obj, MinMaxScaler):
+            # Map min and scale by column name
+            new_min = []
+            new_scale = []
+            for col in target_cols:
+                try:
+                    idx = self.scaling_loader.metadata['dataset']['input_features' if scaler_type=='input' else 'output_features'].index(col)
+                except ValueError:
+                    raise KeyError(f"Column '{col}' not found in scaler metadata '{scaler_type}' features")
+                new_min.append(meta_params['min'][idx])
+                new_scale.append(meta_params['scale'][idx])
+            new_scaler.min_ = np.array(new_min)
+            new_scaler.scale_ = np.array(new_scale)
+            new_scaler.data_min_ = np.array([meta_params['data_min'][self.scaling_loader.metadata['dataset']['input_features' if scaler_type=='input' else 'output_features'].index(c)] for c in target_cols])
+            new_scaler.data_max_ = np.array([meta_params['data_max'][self.scaling_loader.metadata['dataset']['input_features' if scaler_type=='input' else 'output_features'].index(c)] for c in target_cols])
+            new_scaler.feature_range = tuple(meta_params['feature_range'])
+        else:  # StandardScaler
+            new_scaler.mean_ = np.array([meta_params['mean'][self.scaling_loader.metadata['dataset']['input_features' if scaler_type=='input' else 'output_features'].index(c)] for c in target_cols])
+            new_scaler.scale_ = np.array([meta_params['scale'][self.scaling_loader.metadata['dataset']['input_features' if scaler_type=='input' else 'output_features'].index(c)] for c in target_cols])
+            new_scaler.var_ = np.array([meta_params['var'][self.scaling_loader.metadata['dataset']['input_features' if scaler_type=='input' else 'output_features'].index(c)] for c in target_cols])
+            new_scaler.n_samples_seen_ = np.array(meta_params['n_samples_seen'])
+
+        return new_scaler
 
     # ----------------------------------------------------------------------
     def _read_chunk(self, file_path, skip_rows):
@@ -103,19 +145,14 @@ class convert_csv2pt:
             if df.empty:
                 continue
 
-            X_data = df[self.input_col].to_numpy()
-            y_data = df[self.output_col].to_numpy()
-            if X_data.ndim == 1:
-                X_data = X_data.reshape(-1, 1)
-            if y_data.ndim == 1:
-                y_data = y_data.reshape(-1, 1)
+            print(f"column name: {df.columns.tolist()}")
 
-            # Scale data
-            X_scaled = self.scaler_input.transform(X_data)
-            y_scaled = self.scaler_output.transform(y_data)
+            # Map CSV columns to subset scalers automatically
+            X_data = self.match_and_scale(df, self.input_col, self.input_scaler_map)
+            y_data = self.match_and_scale(df, self.output_col, self.output_scaler_map)
 
             # Sequence creation with delay
-            X_seq, y_seq = self.create_sequences(X_scaled, y_scaled,
+            X_seq, y_seq = self.create_sequences(X_data, y_data,
                                                  delay=self.delay,
                                                  step_size=self.step_size)
             if len(X_seq) == 0:
@@ -137,6 +174,17 @@ class convert_csv2pt:
                    self.output_folder / f"{file_name.replace('.csv', '.pt')}")
 
         return file_name
+
+    # ----------------------------------------------------------------------
+    def match_and_scale(self, df, col_list, scaler_obj):
+        """
+        Extract columns from df according to col_list and apply scaler_obj.
+        Automatically reshapes and handles single-column case.
+        """
+        X = df[col_list].to_numpy()
+        if X.ndim == 1:
+            X = X.reshape(-1, 1)
+        return scaler_obj.transform(X)
 
     # ----------------------------------------------------------------------
     def create_sequences(self, X_data, y_data, delay=1, step_size=1):
@@ -316,7 +364,7 @@ class convert_csv2pt:
 if __name__ == "__main__":
 
     ZIP_NAME_SCALER = "Test1_scalers.zip"
-    INPUT_COLUMN = ['DATA_INPUT', "DATA_OUTPUT"]
+    INPUT_COLUMN = ['DATA_INPUT']
     OUTPUT_COULMN = ['DATA_OUTPUT']
     SEQUENCE_SIZE = 100
     DELAY = 5          
