@@ -429,7 +429,7 @@ class TRAIN_MODEL_PT:
 # ============================================================== 
 if __name__ == "__main__":
     FILE_NAME = "test2_dataset_package.zip"
-    FILE_MODEL = "lstm_model_20_s.pth"
+    FILE_MODEL = "lstm_model_2_s.pth"
     SAVE_ENGINE = "pandas"
 
     ROOT = Path(__file__).resolve().parents[2]
@@ -454,11 +454,11 @@ if __name__ == "__main__":
             dataset_type="lazy",
             model_type="DeepLSTM",
             batch_size=512,
-            hidden_dim=128,
-            num_layers=2,
-            lr=1e-3,
-            num_epochs=100,
-            patience=10,
+            hidden_dim=256,
+            num_layers=3,
+            lr=1e-4,
+            num_epochs=1000,
+            patience=20,
             save_engine=SAVE_ENGINE,
             num_worker=1,
         )
