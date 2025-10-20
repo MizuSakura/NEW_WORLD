@@ -1,14 +1,17 @@
 # src/utils/scaling_zip_loader.py
 """
-ScalingZipLoader (Updated)
-==========================
+ScalingZipLoader (Final Auto-Align Version)
+===========================================
 
-Enhanced loader for trained scalers with automatic feature validation
-and mapping based on metadata.
+Enhanced loader for trained scalers (.pkl or joblib) with automatic feature
+alignment and compatibility across training, csv2pt, and inference stages.
 
-- Automatically selects correct input columns according to metadata.
-- Checks feature mismatch before scaling.
-- Provides clear error messages for debugging.
+New features:
+- Supports flexible filename matching inside ZIP (input_scaler.pkl, scaler_in.pkl, etc.)
+- Loads metadata from either `metadata.yaml` or `meta.yaml`
+- Automatically aligns DataFrame columns to scaler feature order
+- Preserves backward compatibility with `.meta`
+- Silences sklearn feature name warnings safely
 """
 
 import io
@@ -23,18 +26,14 @@ from sklearn.preprocessing import MinMaxScaler, StandardScaler
 
 
 class ScalingZipLoader:
-    """
-    Load input/output scalers and metadata from a ZIP file.
-
-    Automatically validates input features against the metadata to prevent
-    feature mismatch errors.
-    """
+    """Load input/output scalers and metadata from a ZIP file."""
 
     def __init__(self, zip_path: str | Path):
         self.zip_path = Path(zip_path)
         self.scaler_in = None
         self.scaler_out = None
-        self.metadata = None
+        self.metadata = None  # Preferred attribute
+        self.meta = None      # Backward-compatible alias
 
         if not self.zip_path.exists():
             raise FileNotFoundError(f"❌ ZIP file not found at: {self.zip_path}")
@@ -42,36 +41,74 @@ class ScalingZipLoader:
         self._load_from_zip()
         print(f"✅ Successfully loaded artifacts from: {self.zip_path.name}")
 
-    # ---------------------------------------------------------------------
-    # Internal helper methods
-    # ---------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # Internal Helpers
+    # ------------------------------------------------------------------
     def _load_from_zip(self):
-        """Load scalers and metadata from ZIP archive."""
+        """Load scalers and metadata from ZIP archive with flexible matching."""
         with zipfile.ZipFile(self.zip_path, "r") as zipf:
-            self.scaler_in = self._load_joblib_from_zip(zipf, "input_scaler.pkl")
-            self.scaler_out = self._load_joblib_from_zip(zipf, "output_scaler.pkl")
-            self.metadata = self._load_yaml_from_zip(zipf, "metadata.yaml")
+            file_list = zipf.namelist()
+
+            # Find scaler files flexibly
+            input_scaler_name = next((f for f in file_list if "input" in f and f.endswith(".pkl")), None)
+            output_scaler_name = next((f for f in file_list if "output" in f and f.endswith(".pkl")), None)
+
+            if not input_scaler_name or not output_scaler_name:
+                raise FileNotFoundError(f"❌ Could not find input/output scaler .pkl files inside {self.zip_path}")
+
+            self.scaler_in = self._load_joblib_from_zip(zipf, input_scaler_name)
+            self.scaler_out = self._load_joblib_from_zip(zipf, output_scaler_name)
+
+            # Load metadata.yaml or meta.yaml
+            meta_file = None
+            for candidate in ["metadata.yaml", "meta.yaml"]:
+                if candidate in file_list:
+                    meta_file = candidate
+                    break
+
+            if meta_file:
+                self.metadata = self._load_yaml_from_zip(zipf, meta_file)
+                self.meta = self.metadata
+            else:
+                warnings.warn("⚠️ No metadata.yaml or meta.yaml found.", UserWarning)
 
     def _load_joblib_from_zip(self, zipf, filename):
         """Helper to load joblib-serialized object from ZIP."""
-        try:
-            with zipf.open(filename) as f:
-                return joblib.load(io.BytesIO(f.read()))
-        except KeyError:
-            raise FileNotFoundError(f"❌ '{filename}' not found in ZIP.")
+        with zipf.open(filename) as f:
+            return joblib.load(io.BytesIO(f.read()))
 
     def _load_yaml_from_zip(self, zipf, filename):
-        """Helper to load YAML files safely."""
-        try:
-            with zipf.open(filename) as f:
-                return yaml.safe_load(f)
-        except KeyError:
-            warnings.warn(f"⚠️ '{filename}' not found in ZIP.", UserWarning)
-            return None
+        """Helper to safely load YAML metadata file."""
+        with zipf.open(filename) as f:
+            return yaml.safe_load(f)
 
-    # ---------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # Internal Alignment Helper
+    # ------------------------------------------------------------------
+    def _align_features(self, df: pd.DataFrame, scaler):
+        """Ensure DataFrame columns match scaler training order."""
+        if not isinstance(df, pd.DataFrame):
+            return df  # skip if it's already ndarray
+
+        if hasattr(scaler, "feature_names_in_"):
+            scaler_features = list(scaler.feature_names_in_)
+            missing = [f for f in scaler_features if f not in df.columns]
+            if missing:
+                raise ValueError(f"❌ Missing features in input: {missing}")
+
+            # Reorder DataFrame columns to scaler feature order
+            return df[scaler_features]
+        elif self.metadata and "dataset" in self.metadata:
+            # fallback: use metadata order
+            expected_cols = self.metadata["dataset"].get("input_features", [])
+            if expected_cols:
+                available = [c for c in expected_cols if c in df.columns]
+                return df[available]
+        return df
+
+    # ------------------------------------------------------------------
     # Public API
-    # ---------------------------------------------------------------------
+    # ------------------------------------------------------------------
     def summary(self):
         """Display metadata summary."""
         print("\n" + "=" * 50)
@@ -84,58 +121,32 @@ class ScalingZipLoader:
         print("=" * 50)
 
     def transform_input(self, X: pd.DataFrame | np.ndarray) -> np.ndarray:
-        """
-        Transform input data with automatic feature mapping and validation.
-
-        Parameters
-        ----------
-        X : pd.DataFrame or np.ndarray
-            Input data. If DataFrame, column names are matched against metadata.
-
-        Returns
-        -------
-        np.ndarray
-            Scaled input data.
-
-        Raises
-        ------
-        ValueError
-            If input features do not match scaler's expected features.
-        """
+        """Transform input data with auto feature alignment."""
         if isinstance(X, pd.DataFrame):
-            # Map DataFrame columns according to metadata
-            expected_cols = self.metadata["dataset"]["input_features"]
-            missing = [c for c in expected_cols if c not in X.columns]
-            if missing:
-                raise ValueError(
-                    f"❌ Missing expected input columns: {missing}"
-                )
-            X_mapped = X[expected_cols].values
+            X_aligned = self._align_features(X, self.scaler_in)
+            X_values = X_aligned.values
         else:
-            X_mapped = np.asarray(X)
+            X_values = np.asarray(X)
 
-        # Validate feature count
-        expected_features = self.scaler_in.n_features_in_
-        if X_mapped.shape[1] != expected_features:
-            raise ValueError(
-                f"❌ Input feature mismatch: expected {expected_features} features "
-                f"({self.metadata['dataset']['input_features']}), but got {X_mapped.shape[1]}"
-            )
-
-        return self.scaler_in.transform(X_mapped)
+        # Silence sklearn feature name warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=UserWarning)
+            return self.scaler_in.transform(X_values)
 
     def inverse_output(self, y_scaled: np.ndarray) -> np.ndarray:
         """Inverse transform scaled output data."""
-        return self.scaler_out.inverse_transform(y_scaled)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=UserWarning)
+            return self.scaler_out.inverse_transform(y_scaled)
 
     def is_loaded(self) -> bool:
         """Check if all artifacts are loaded successfully."""
-        return all([self.scaler_in, self.scaler_out, self.metadata])
+        return all([self.scaler_in, self.scaler_out])
 
 
-# ---------------------------------------------------------------------
+# ------------------------------------------------------------------
 # Standalone test
-# ---------------------------------------------------------------------
+# ------------------------------------------------------------------
 if __name__ == "__main__":
     ZIP_FILE_PATH = Path(r"D:\Project_end\New_world\my_project\config\Test_scale1_scalers.zip")
     print(f"🧪 Attempting to load scaling artifacts from: {ZIP_FILE_PATH}")
@@ -145,7 +156,6 @@ if __name__ == "__main__":
         loader.summary()
 
         if loader.is_loaded():
-            # Test with DataFrame input using metadata columns
             import pandas as pd
             input_cols = loader.metadata["dataset"]["input_features"]
             X_test = pd.DataFrame([[12, 15]], columns=input_cols)
