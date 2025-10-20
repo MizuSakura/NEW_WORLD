@@ -15,15 +15,17 @@ def run_simulation(env, signal_generator, signal_type='pwm', signal_params=None,
                    folder_save_plot=Path("./data/picture"), file_prefix="sim"):
     """
     Run simulation for a given environment and signal generator.
+    Logs TIME, DATA_INPUT, and DATA_OUTPUT, and saves results as both CSV and plot.
     """
     folder_save_csv.mkdir(parents=True, exist_ok=True)
     folder_save_plot.mkdir(parents=True, exist_ok=True)
 
-    # Reset environment
+    # ==========================================================
+    # RESET ENVIRONMENT AND GENERATE SIGNAL
+    # ==========================================================
     env.reset(default=0.0)
-
-    # Generate signal
     signal_params = signal_params or {}
+
     if signal_type == 'pwm':
         _, signal = signal_generator.pwm(**signal_params)
     elif signal_type == 'step':
@@ -39,14 +41,14 @@ def run_simulation(env, signal_generator, signal_type='pwm', signal_params=None,
     else:
         raise ValueError(f"Unsupported signal_type: {signal_type}")
 
+    # ==========================================================
+    # SIMULATION LOOP
+    # ==========================================================
     logger = Logger()
     dt = signal_generator.dt
     log_interval = max(1, int(log_dt / dt))
     DATA_OUTPUT, ACTION, TIME_LOG = [], [], []
 
-    # ==========================================================
-    # MAIN SIMULATION LOOP
-    # ==========================================================
     for idx, val in enumerate(signal):
         action = val * (env.max_action_volt if env.mode == 'voltage' else env.max_action_current)
         out, done = env.step(action)
@@ -56,44 +58,39 @@ def run_simulation(env, signal_generator, signal_type='pwm', signal_params=None,
             TIME_LOG.append(idx * dt)
 
     # ==========================================================
-    # SAVE DATA
+    # SAVE DATA (CSV) + PLOT RESULTS
     # ==========================================================
     logger.add_data_log(["TIME", "DATA_INPUT", "DATA_OUTPUT"], [TIME_LOG, ACTION, DATA_OUTPUT])
-    file_name_csv = f"{file_prefix}_{signal_type}.csv"
-    logger.save_to_csv(file_name=file_name_csv, folder_name=folder_save_csv)
 
-    # ==========================================================
-    # PLOT RESULTS (with signal metadata)
-    # ==========================================================
-    plt.figure(figsize=(10, 4))
-    plt.plot(TIME_LOG, DATA_OUTPUT, label='DATA_OUTPUT')
-    plt.plot(TIME_LOG, ACTION, label='DATA_INPUT', alpha=0.5)
-
-    # Extract parameters safely (if missing, show '-')
+    # Extract readable metadata (for both file name and plot title)
     meta_info = ", ".join([
         f"{k}={v:.3f}" if isinstance(v, (int, float)) else f"{k}={v}"
         for k, v in signal_params.items()
     ])
+    meta_suffix = "_".join([
+        f"{k}_{v}" for k, v in signal_params.items() if isinstance(v, (int, float, str))
+    ])
 
-    # Plot title with metadata
+    # File names
+    file_name_plot = f"{file_prefix}_{signal_type}_{meta_suffix}.png"
+    file_name_csv = f"{file_prefix}_{signal_type}_{meta_suffix}.csv"
+
+    # --- Plot simulation results ---
+    plt.figure(figsize=(10, 4))
+    plt.plot(TIME_LOG, DATA_OUTPUT, label='DATA_OUTPUT')
+    plt.plot(TIME_LOG, ACTION, label='DATA_INPUT', alpha=0.5)
     plt.title(f"Simulation - {signal_type.upper()} ({meta_info})")
     plt.xlabel("Time [s]")
     plt.ylabel("Amplitude")
     plt.grid(True)
     plt.legend()
 
-    # File name includes signal metadata (safe for file system)
-    meta_suffix = "_".join([f"{k}_{v}" for k, v in signal_params.items() if isinstance(v, (int, float, str))])
-    file_name_plot = f"{file_prefix}_{signal_type}_{meta_suffix}.png"
-    file_name_csv = f"{file_prefix}_{signal_type}_{meta_suffix}.csv"
-
-    # Save to folders
+    # Save files
     plt.savefig(folder_save_plot / file_name_plot)
     logger.save_to_csv(file_name=file_name_csv, folder_name=folder_save_csv)
 
     plt.pause(2)
     plt.close()
-
 
 # ==============================================================
 # MAIN ENTRY POINT
@@ -134,9 +131,9 @@ if __name__ == "__main__":
     # ------------------------
     # Run according to signal type
     # ------------------------
-    freq_list = [0.001,0.01,0.1,1,2]
+    freq_list = [0.1]
     if signal_type == 'pwm':
-        duty_list = [0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9]
+        duty_list = [0.1,0.2,0.,0.4,0.5,0.6,0.7,0.8,0.9]
         
         for duty in duty_list:
             for freq in freq_list:
