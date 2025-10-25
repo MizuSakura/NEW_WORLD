@@ -364,7 +364,7 @@ class convert_csv2pt:
 if __name__ == "__main__":
 
     ZIP_NAME_SCALER = "Test1_scalers.zip"
-    INPUT_COLUMN = ['DATA_INPUT']
+    INPUT_COLUMN = ['DATA_INPUT','DATA_OUTPUT']
     OUTPUT_COULMN = ['DATA_OUTPUT']
     SEQUENCE_SIZE = 100
     DELAY = 5          
