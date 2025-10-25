@@ -455,7 +455,7 @@ if __name__ == "__main__":
             model_type="DeepLSTM",
             batch_size=512,
             hidden_dim=256,
-            num_layers=3,
+            num_layers=4,
             lr=1e-4,
             num_epochs=1000,
             patience=20,
