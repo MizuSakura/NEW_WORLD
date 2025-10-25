@@ -163,8 +163,8 @@ class GlobalScalingReference:
                     self.total_rows += len(chunk)
 
                     # Extract input/output features
-                    X = chunk[self.input_features].values
-                    y = chunk[self.output_features].values
+                    X = chunk[self.input_features]
+                    y = chunk[self.output_features]
 
                     # Incrementally fit the scalers
                     self.scaler_in.partial_fit(X)
