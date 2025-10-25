@@ -7,7 +7,7 @@ __pycache__/
 SCRIPTS.PY
 #config
 config/
-src/data/tools/
+
 # Data
 /data/raw/
 /data/processed/
