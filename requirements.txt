@@ -8,4 +8,6 @@ pytest
 nbdime
 prefetch-generator
 tqdm
-pyarrow
+pyarrow==15.0.2
+paho-mqtt
+requests
