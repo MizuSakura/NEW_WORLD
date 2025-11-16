@@ -9,3 +9,9 @@ nbdime
 prefetch-generator
 tqdm
 pyarrow
+paho-mqtt
+gymnasium
+"gymnasium[classic_control]"
+imageio 
+pillow
+imageio[ffmpeg]
