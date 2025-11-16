@@ -21,3 +21,5 @@ my_project\data/
 *.png
 experiments/config/predict_model/
 .vscode/
+*.mp4
+.gitignore
