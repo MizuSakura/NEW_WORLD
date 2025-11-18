@@ -15,3 +15,6 @@ gymnasium
 imageio 
 pillow
 imageio[ffmpeg]
+mujoco
+gymnasium[mujoco]
+dm-control
