@@ -589,23 +589,88 @@ class SACAgent:
     # ======================================================================
     # Save / Load Model (Drop-Version Safe, pathlib + auto .pt)
     # ======================================================================
+        # ======================================================================
+    # Auto-Save / Auto-Load Checkpoints (with episode tracking)
+    # ======================================================================
+    def save_checkpoint(self, episode, path="checkpoints/sac_checkpoint.pt"):
+        """
+        Save full training state including:
+        - networks (actor, critic, target critic)
+        - optimizers
+        - hyperparameters
+        - episode number
+        """
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        checkpoint = {
+            "episode": episode,
+            "actor": self.actor.state_dict(),
+            "critic": self.critic.state_dict(),
+            "target_critic": self.target_critic.state_dict(),
+            "actor_opt": self.actor_opt.state_dict(),
+            "critic_opt": self.critic_opt.state_dict(),
+            "hyperparams": {
+                "gamma": self.gamma,
+                "tau": self.tau,
+                "alpha": self.alpha,
+                "min_action": self.actor.min_action.cpu().tolist(),
+                "max_action": self.actor.max_action.cpu().tolist(),
+                "state_dim": self.actor.state_dim,
+                "action_dim": self.actor.action_dim
+            }
+        }
+
+        torch.save(checkpoint, path)
+        print(f"[AutoSave] Checkpoint saved at episode {episode} → {path}")
+
+
+    def load_checkpoint(self, path="checkpoints/sac_checkpoint.pt"):
+        """
+        Load full training state and return the episode number
+        so training can be resumed seamlessly.
+        """
+        path = Path(path)
+        if not path.exists():
+            raise FileNotFoundError(f"[AutoSave] No checkpoint found at: {path}")
+
+        checkpoint = torch.load(path, map_location=self.device)
+
+        # --- Load hyperparameters ---
+        hyper = checkpoint["hyperparams"]
+        self.gamma = hyper["gamma"]
+        self.tau = hyper["tau"]
+        self.alpha = hyper["alpha"]
+
+        min_action = torch.tensor(hyper["min_action"], dtype=torch.float32)
+        max_action = torch.tensor(hyper["max_action"], dtype=torch.float32)
+        state_dim  = hyper["state_dim"]
+        action_dim = hyper["action_dim"]
+
+        # --- Recreate actor (architecture must match) ---
+        self.actor = Actor(state_dim, action_dim, min_action, max_action).to(self.device)
+        self.actor.load_state_dict(checkpoint["actor"])
+
+        # --- Load critic & target critic ---
+        self.critic.load_state_dict(checkpoint["critic"])
+        self.target_critic.load_state_dict(checkpoint["target_critic"])
+
+        # --- Load optimizers ---
+        self.actor_opt.load_state_dict(checkpoint["actor_opt"])
+        self.critic_opt.load_state_dict(checkpoint["critic_opt"])
+
+        ep = checkpoint["episode"]
+        print(f"[AutoSave] Checkpoint loaded from episode {ep}")
+
+        return ep
     def save_model(self, path="sac_model.pt"):
         """
-        Save Actor, Critic, Target Critic networks and hyperparameters
-        into a single file using state_dict.
-        Drop-version safe (compatible across PyTorch versions).
-
-        Parameters
-        ----------
-        path : str or Path
-            File path for saving the model.
-            Example: "checkpoints/sac_model" or "checkpoints/sac_model.pt"
+        Save only model weights + hyperparameters.
+        Optimizers are excluded because this file is meant for evaluation.
         """
         path = Path(path)
         if path.suffix != ".pt":
-            path = path.with_suffix(".pt")  # Add .pt if missing
-
-        # Ensure parent directories exist
+            path = path.with_suffix(".pt")
         path.parent.mkdir(parents=True, exist_ok=True)
 
         data = {
@@ -619,16 +684,21 @@ class SACAgent:
                 "min_action": self.actor.min_action.cpu().tolist(),
                 "max_action": self.actor.max_action.cpu().tolist(),
                 "state_dim": self.actor.state_dim,
-                "action_dim": self.actor.action_dim
-            }
+                "action_dim": self.actor.action_dim,
+            },
         }
+
         torch.save(data, path)
         print(f"[SACAgent] Model saved to '{path}'")
 
+
+    # ======================================================================
+    # Load Final Model (For Evaluation)
+    # ======================================================================
     def load_model(self, path="sac_model.pt"):
         """
-        Load Actor, Critic, Target Critic networks and hyperparameters
-        from a single drop-version-safe file.
+        Load model weights only (for evaluation).
+        Does not load optimizer states.
         """
         path = Path(path)
         if path.suffix != ".pt":
@@ -637,45 +707,16 @@ class SACAgent:
         if not path.exists():
             raise FileNotFoundError(f"[SACAgent] File not found: '{path}'")
 
-        # Safe loader for drop-version compatibility
         data = torch.load(path, map_location=self.device)
 
-        # ------------------------------------------------------------------
-        # Helper: safely convert anything → Tensor without PyTorch warning
-        # ------------------------------------------------------------------
-        def to_tensor_safe(x):
-            if isinstance(x, torch.Tensor):
-                return x.detach().clone().float()
-            return torch.as_tensor(x, dtype=torch.float32)
-
-        # ------------------------------------------------------------------
-        # 1) Load hyperparameters
-        # ------------------------------------------------------------------
+        # basic parameters
         hyper = data["hyperparams"]
         self.gamma = hyper["gamma"]
         self.tau = hyper["tau"]
         self.alpha = hyper["alpha"]
 
-        min_action = to_tensor_safe(hyper["min_action"])
-        max_action = to_tensor_safe(hyper["max_action"])
-
-        state_dim  = hyper["state_dim"]
-        action_dim = hyper["action_dim"]
-
-        # ------------------------------------------------------------------
-        # 2) Re-create Actor (must match original architecture)
-        # ------------------------------------------------------------------
-        self.actor = Actor(
-            state_dim=state_dim,
-            action_dim=action_dim,
-            min_action=min_action,
-            max_action=max_action
-        ).to(self.device)
-
-        # ------------------------------------------------------------------
-        # 3) Load network weights (drop-version safe)
-        # ------------------------------------------------------------------
-        self.actor.load_state_dict(data["actor"], strict=False)
+        # load weights
+        self.actor.load_state_dict(data["actor"])
         self.critic.load_state_dict(data["critic"])
         self.target_critic.load_state_dict(data["target_critic"])
 
