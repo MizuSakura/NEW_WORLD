@@ -18,3 +18,4 @@ imageio[ffmpeg]
 mujoco
 gymnasium[mujoco]
 dm-control
+stable-baselines3
