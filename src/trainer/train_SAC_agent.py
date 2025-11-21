@@ -11,11 +11,12 @@ from src.environment.RCTankEnv_gym import RCTankEnv
 # ======================================================
 # 1) Create environment
 # ======================================================
-# env = gym.make("Pendulum-v1", render_mode="human")
-env = RCTankEnv(render_mode="human")
+env = gym.make("Acrobot-v1", render_mode="human")
+#env = RCTankEnv(render_mode="human")
 
 state, _ = env.reset()
 state_dim = state.shape[0]
+
 action_dim = env.action_space.shape[0]
 min_action = env.action_space.low
 max_action = env.action_space.high
@@ -37,14 +38,17 @@ agent = SACAgent(
     gamma=0.99,
     tau=0.005,
     alpha=0.4,
-    logger_status=True
+    logger_status=True,
+    simple_layers_actor=2,
+    simple_hidden_actor=256,
+    advanced_hidden_size_actor=None
 )
 
 
 # ======================================================
 # 3) Training Hyperparameters
 # ======================================================
-episodes = 10000
+episodes = 1000
 max_steps = 200
 batch_size = 1080
 
@@ -104,10 +108,12 @@ for ep in range(start_episode, episodes + 1):
         episode_reward += reward
 
         if done:
+            agent.logger.save()
+            agent.logger.clear()
             break
 
     rewards_history.append(episode_reward)
-    print(f"Episode {ep}/{episodes} | Reward = {episode_reward:.2f}")
+    print(f"Episode {ep}/{episodes} | Reward = {episode_reward:.2f} | status train:{done} ")
 
     # ==================================================
     # Auto-Save checkpoint every N episodes
@@ -119,7 +125,7 @@ for ep in range(start_episode, episodes + 1):
 # ======================================================
 # 6) Save final model (for evaluation purposes)
 # ======================================================
-final_model_path = r"D:\Project_end\New_world\my_project\models\Test_RCTankEnv.pt"
+final_model_path = r"D:\Project_end\New_world\my_project\models\Test_Acrobot-v1.pt"
 agent.save_model(path=final_model_path)
 
 env.close()
