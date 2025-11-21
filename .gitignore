@@ -24,3 +24,4 @@ experiments/config/predict_model/
 *.mp4
 .gitignore
 *.pt
+*zip
