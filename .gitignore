@@ -25,3 +25,4 @@ experiments/config/predict_model/
 .gitignore
 *.pt
 *zip
+*.parquet
