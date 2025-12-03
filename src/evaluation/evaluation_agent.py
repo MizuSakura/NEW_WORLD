@@ -34,7 +34,7 @@ def test_agent(env, agent, episodes=20, max_steps=1000):
             state = next_state
 
             if done:
-                break
+                pass
 
         returns.append(episode_reward)
         trajectories.append({
