@@ -4,14 +4,16 @@ from src.agent.SAC_Agent import SACAgent
 import gymnasium as gym
 import numpy as np
 from pathlib import Path
-from src.environment.RC_Tank_env import RC_Tank_Env
-from src.environment.RCTankEnv_gym import RCTankEnv
+import src.environment.register_envs
+from  src.utils.logger_pyarrow import EpisodeLogger
+
 
 
 # ======================================================
 # 1) Create environment
 # ======================================================
-env = gym.make("Acrobot-v1", render_mode="human")
+env = gym.make("RCTankEnv-v0", render_mode="human")
+Logger = EpisodeLogger(folder=r"D:\Project_end\New_world\my_project\logs\episode",filename="episode_")
 #env = RCTankEnv(render_mode="human")
 
 state, _ = env.reset()
@@ -41,7 +43,13 @@ agent = SACAgent(
     logger_status=True,
     simple_layers_actor=2,
     simple_hidden_actor=256,
-    advanced_hidden_size_actor=None
+    advanced_hidden_size_actor=None,
+    simple_layers_critic= 2,
+    simple_hidden_critic= 256,
+    advanced_hidden_sizes_critic=None,
+    critic_encoder=False,
+    logger_path=r"D:\Project_end\New_world\my_project\logs\agent\RC_Tank",
+    file_name_log = "optimized_"
 )
 
 
@@ -51,7 +59,7 @@ agent = SACAgent(
 episodes = 1000
 max_steps = 200
 batch_size = 1080
-
+Logging_status = True
 rewards_history = []
 
 checkpoint_path = Path(r"D:\Project_end\New_world\my_project\models\sac_checkpoint.pt")
@@ -76,7 +84,8 @@ else:
 # ======================================================
 for ep in range(start_episode, episodes + 1):
 
-    state, _ = env.reset()
+    state, info = env.reset()
+    current_setpoint = info.get("setpoint", None)
     episode_reward = 0
 
     for step in range(max_steps):
@@ -90,6 +99,7 @@ for ep in range(start_episode, episodes + 1):
         # (2) Step environment
         # -----------------------------------------
         next_state, reward, terminated, truncated, info = env.step(action)
+        current_setpoint = info.get("setpoint", current_setpoint)
         env.render()
 
         done = terminated or truncated
@@ -98,6 +108,9 @@ for ep in range(start_episode, episodes + 1):
         # (3) Store transition
         # -----------------------------------------
         agent.replay_buffer.push(state, action, reward, next_state, float(done))
+        if Logging_status:
+            Logger.log(episode=ep,setpoint=current_setpoint,step=step,state=state,action=action,reward=reward,next_state=next_state,done=done)
+
 
         # -----------------------------------------
         # (4) SAC update
@@ -108,12 +121,14 @@ for ep in range(start_episode, episodes + 1):
         episode_reward += reward
 
         if done:
-            agent.logger.save()
-            agent.logger.clear()
             break
 
     rewards_history.append(episode_reward)
     print(f"Episode {ep}/{episodes} | Reward = {episode_reward:.2f} | status train:{done} ")
+    Logger.save()
+    Logger.clear()
+    agent.logger.save()
+    agent.logger.clear()
 
     # ==================================================
     # Auto-Save checkpoint every N episodes
