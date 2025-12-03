@@ -91,7 +91,7 @@ class RCTankEnv(gym.Env):
         self.action_history = []
 
         obs = np.array([self.level, self.prev_action, self.setpoint], dtype=np.float32)
-        info = {}
+        info = {"setpoint": self.setpoint}
         return obs, info
 
 
@@ -149,7 +149,7 @@ class RCTankEnv(gym.Env):
             self.done += self.dt
         terminated = self.done > (5 * self.dt)
         truncated = False
-        info = {}
+        info = {"setpoint": self.setpoint}
 
         return obs, reward, terminated, truncated, info
 
