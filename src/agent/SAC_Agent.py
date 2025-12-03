@@ -4,9 +4,9 @@ import torch
 import torch.nn.functional as F
 from pathlib import Path
 
-from src.agent.network import Logger, Actor, Critic
+from src.agent.network import  Actor, Critic
 from src.agent.replaybuffer import Vanilla_ReplayBuffer
-from  src.data.logger_pyarrow import ArrowLogger
+from  src.utils.logger_pyarrow import MetricLogger
 
 class SACAgent:
     """
@@ -40,7 +40,8 @@ class SACAgent:
                  simple_hidden_critic=256,
                  advanced_hidden_sizes_critic=None,
                  critic_encoder=False,
-                 logger_path=r"D:\Project_end\New_world\my_project\logs\agent"
+                 logger_path=r"D:\Project_end\New_world\my_project\logs\agent\RC_Tank",
+                 file_name_log = None
                  ):
 
         # ------------------------------------------------------------
@@ -110,7 +111,8 @@ class SACAgent:
 
         # Logger
         self.logger_path = logger_path
-        self.logger = ArrowLogger(metric_base=self.logger_path)
+        self.file_name_log = file_name_log
+        self.logger = MetricLogger(folder= self.logger_path, filename= self.file_name_log,auto_increment= True)
         self.logger_status = logger_status
         self.action_log = None
 
@@ -185,14 +187,15 @@ class SACAgent:
         # Logging
         # ------------------------------------------------------------
         if self.logger_status:
-            self.logger.log_metric("loss_actor", actor_loss.item())
-            self.logger.log_metric("loss_critic", critic_loss.item())
-            self.logger.log_metric("q1_mean", q1.mean().item())
-            self.logger.log_metric("q2_mean", q2.mean().item())
-            self.logger.log_metric("entropy", -log_pi.mean().item())
-            self.logger.log_metric("alpha", self.alpha)
-            self.logger.log_metric("tau", self.tau)
-            self.logger.log_metric("action", self.action_log)
+            
+            self.logger.log("loss_actor", actor_loss.item())
+            self.logger.log("loss_critic", critic_loss.item())
+            self.logger.log("q1_mean", q1.mean().item())
+            self.logger.log("q2_mean", q2.mean().item())
+            self.logger.log("entropy", -log_pi.mean().item())
+            self.logger.log("alpha", self.alpha)
+            self.logger.log("tau", self.tau)
+            self.logger.log("action", self.action_log)
 
     # ======================================================================
     # Checkpoint: Save everything (model + optimizers + episode)
@@ -418,7 +421,7 @@ class SACAgent:
         Reset the entire logger. Useful when starting a new experiment or
         evaluation cycle.
         """
-        self.logger = Logger()      # new fresh logger
+        self.logger = MetricLogger(folder= self.logger_path, filename= self.file_name_log,auto_increment= True)
         print("[Logger] Reset: created a new empty logger.")
 
     def clear_logger(self, key=None):
