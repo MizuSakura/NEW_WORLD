@@ -20,3 +20,4 @@ gymnasium[mujoco]
 dm-control
 stable-baselines3
 pymodbus
+schemdraw
