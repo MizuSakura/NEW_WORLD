@@ -1,149 +1,203 @@
-#my_project\src\trainer\train_SAC_agent.py
+# my_project/src/trainer/train_SAC_agent.py
 
 from src.agent.SAC_Agent import SACAgent
 import gymnasium as gym
 import numpy as np
 from pathlib import Path
 import src.environment.register_envs
-from  src.utils.logger_pyarrow import EpisodeLogger
-
-
-
-# ======================================================
-# 1) Create environment
-# ======================================================
-env = gym.make("RCTankEnv-v0", render_mode="human")
-Logger = EpisodeLogger(folder=r"D:\Project_end\New_world\my_project\logs\episode",filename="episode_")
-#env = RCTankEnv(render_mode="human")
-
-state, _ = env.reset()
-state_dim = state.shape[0]
-
-action_dim = env.action_space.shape[0]
-min_action = env.action_space.low
-max_action = env.action_space.high
-
-print("State dim:", state_dim)
-print("Action dim:", action_dim)
-print("Action range:", min_action, max_action)
+from src.utils.logger_pyarrow import EpisodeLogger
 
 
 # ======================================================
-# 2) Create SAC agent
+# Environment setup
 # ======================================================
-agent = SACAgent(
-    state_dim=state_dim,
-    action_dim=action_dim,
-    min_action=min_action,
-    max_action=max_action,
-    lr=3e-4,
-    gamma=0.99,
-    tau=0.005,
-    alpha=0.4,
-    logger_status=True,
-    simple_layers_actor=2,
-    simple_hidden_actor=256,
-    advanced_hidden_size_actor=None,
-    simple_layers_critic= 2,
-    simple_hidden_critic= 256,
-    advanced_hidden_sizes_critic=None,
-    critic_encoder=False,
-    logger_path=r"D:\Project_end\New_world\my_project\logs\agent\RC_Tank",
-    file_name_log = "optimized_"
-)
+def env_setup(name_env="RCTankEnv-v0", render_mode="human"):
+    env = gym.make(name_env, render_mode=render_mode)
+
+    state, _ = env.reset()
+    state_dim = state.shape[0]
+
+    action_dim = env.action_space.shape[0]
+    min_action = env.action_space.low
+    max_action = env.action_space.high
+
+    print("State dim:", state_dim)
+    print("Action dim:", action_dim)
+    print("Action range:", min_action, max_action)
+
+    return env, state_dim, action_dim, min_action, max_action
 
 
 # ======================================================
-# 3) Training Hyperparameters
+# Training logic
 # ======================================================
-episodes = 1000
-max_steps = 200
-batch_size = 1080
-Logging_status = True
-rewards_history = []
+def train_Agent(
+    env,
+    agent,
+    logger,
+    EPISODES,
+    MAX_STEPS,
+    BATCH_SIZE,
+    CHECKPOINT_PATH,
+    AUTO_SAVE_EVERY,
+    LOGGIN_STATUS_EP=True,
+    FINAL_MODEL_PATH=None
+):
+    # ---------- Resume ----------
+    start_episode = 1
+    if CHECKPOINT_PATH.exists():
+        print("\n[Trainer] Found checkpoint. Loading...")
+        start_episode = agent.load_checkpoint(CHECKPOINT_PATH) + 1
+        print(f"[Trainer] Resuming training from episode {start_episode}\n")
+    else:
+        print("\n[Trainer] No checkpoint found. Starting from episode 1\n")
 
-checkpoint_path = Path(r"D:\Project_end\New_world\my_project\models\sac_checkpoint.pt")
-autosave_every = 10  # Save checkpoint every N episodes
+    # ---------- Training loop ----------
+    for ep in range(start_episode, EPISODES + 1):
 
+        state, info = env.reset()
+        current_setpoint = info.get("setpoint", None)
+        episode_reward = 0.0
 
-# ======================================================
-# 4) Auto-Load Checkpoint (if exists)
-# ======================================================
-start_episode = 1
+        for step in range(MAX_STEPS):
 
-if checkpoint_path.exists():
-    print("\n[Trainer] Found checkpoint. Loading...")
-    start_episode = agent.load_checkpoint(checkpoint_path) + 1
-    print(f"[Trainer] Resuming training from episode {start_episode}\n")
-else:
-    print("\n[Trainer] No checkpoint found. Starting from episode 1\n")
+            # (1) Select action
+            action = agent.select_action(state)
 
+            # (2) Environment step
+            next_state, reward, terminated, truncated, info = env.step(action)
+            env.render()
 
-# ======================================================
-# 5) Training Loop
-# ======================================================
-for ep in range(start_episode, episodes + 1):
+            done = terminated or truncated
+            current_setpoint = info.get("setpoint", current_setpoint)
 
-    state, info = env.reset()
-    current_setpoint = info.get("setpoint", None)
-    episode_reward = 0
+            # (3) Store transition
+            agent.replay_buffer.push(
+                state, action, reward, next_state, float(done)
+            )
 
-    for step in range(max_steps):
+            if LOGGIN_STATUS_EP:
+                logger.log(
+                    episode=ep,
+                    setpoint=current_setpoint,
+                    step=step,
+                    state=state,
+                    action=action,
+                    reward=reward,
+                    next_state=next_state,
+                    done=done
+                )
 
-        # -----------------------------------------
-        # (1) Select action
-        # -----------------------------------------
-        action = agent.select_action(state)
+            # (4) SAC update
+            agent.update(BATCH_SIZE)
 
-        # -----------------------------------------
-        # (2) Step environment
-        # -----------------------------------------
-        next_state, reward, terminated, truncated, info = env.step(action)
-        current_setpoint = info.get("setpoint", current_setpoint)
-        env.render()
+            state = next_state
+            episode_reward += reward
 
-        done = terminated or truncated
+            if done:
+                break
 
-        # -----------------------------------------
-        # (3) Store transition
-        # -----------------------------------------
-        agent.replay_buffer.push(state, action, reward, next_state, float(done))
-        if Logging_status:
-            Logger.log(episode=ep,setpoint=current_setpoint,step=step,state=state,action=action,reward=reward,next_state=next_state,done=done)
+        print(
+            f"Episode {ep}/{EPISODES} | "
+            f"Reward = {episode_reward:.2f}"
+        )
 
+        logger.save()
+        logger.clear()
+        agent.logger.save()
+        agent.logger.clear()
 
-        # -----------------------------------------
-        # (4) SAC update
-        # -----------------------------------------
-        agent.update(batch_size)
+        # ---------- Auto-save ----------
+        if ep % AUTO_SAVE_EVERY == 0:
+            agent.save_checkpoint(ep, CHECKPOINT_PATH)
+    agent.save_model(FINAL_MODEL_PATH)
 
-        state = next_state
-        episode_reward += reward
+    env.close()
+    print("\n[Trainer] Training finished.")
+if __name__ == "__main__":
 
-        if done:
-            break
+    # env config
+    NAME_ENV = "RCTankEnv-v0"
+    RENDER_MODE = "human"
+    FOLDER_LOGGER = r"D:\Project_end\New_world\my_project\logs\episode"
+    FILE_NAME_LOGGER = "episode_"
 
-    rewards_history.append(episode_reward)
-    print(f"Episode {ep}/{episodes} | Reward = {episode_reward:.2f} | status train:{done} ")
-    Logger.save()
-    Logger.clear()
-    agent.logger.save()
-    agent.logger.clear()
+    # training config
+    EPISODES = 1000
+    MAX_STEPS = 200
+    BATCH_SIZE = 1080
+    LOGGIN_STATUS_EP = True
 
-    # ==================================================
-    # Auto-Save checkpoint every N episodes
-    # ==================================================
-    if ep % autosave_every == 0:
-        agent.save_checkpoint(ep, checkpoint_path)
+    # agent config
+    LEARNING_RATE = 3e-4
+    GAMMA = 0.99
+    TAU = 0.005
+    ALPHA = 0.4
+    LOGGER_STATUS = True
 
+    SIMPLE_LAYERS_ACTOR = 2
+    SIMPLE_HIDDEN_ACTOR = 256
+    ADVANCED_HIDDEN_SIZE_ACTOR = None
 
-# ======================================================
-# 6) Save final model (for evaluation purposes)
-# ======================================================
-final_model_path = r"D:\Project_end\New_world\my_project\models\Test_Acrobot-v1.pt"
-agent.save_model(path=final_model_path)
+    SIMPLE_LAYERS_CRITIC = 2
+    SIMPLE_HIDDEN_CRITIC = 256
+    ADVANCED_HIDDEN_SIZE_CRITIC = None
+    CRITIC_ENCODE = False
 
-env.close()
+    LOGGER_PATH_AGENT = r"D:\Project_end\New_world\my_project\logs\agent\RC_Tank"
+    LOGGER_FILE_NAME_AGENT = "optimized_"
 
-print("\n[Trainer] Training finished.")
-print(f"[Trainer] Final model saved to: {final_model_path}")
+    # auto save
+    CHECKPOINT_PATH = Path(
+        r"D:\Project_end\New_world\my_project\models\checkpoint\sac_checkpoint.pt"
+    )
+    AUTO_SAVE_EVERY = 10
+    FINAL_MODEL_PATH =  r"D:\Project_end\New_world\my_project\models\Test_Acrobot-v1.pt"
+
+    # logger
+    logger = EpisodeLogger(
+        folder=FOLDER_LOGGER,
+        filename=FILE_NAME_LOGGER
+    )
+
+    # environment
+    env, state_dim, action_dim, min_action, max_action = env_setup(
+        name_env=NAME_ENV,
+        render_mode=RENDER_MODE
+    )
+
+    # agent
+    agent = SACAgent(
+        state_dim=state_dim,
+        action_dim=action_dim,
+        min_action=min_action,
+        max_action=max_action,
+        lr=LEARNING_RATE,
+        gamma=GAMMA,
+        tau=TAU,
+        alpha=ALPHA,
+        logger_status=LOGGER_STATUS,
+        simple_layers_actor=SIMPLE_LAYERS_ACTOR,
+        simple_hidden_actor=SIMPLE_HIDDEN_ACTOR,
+        advanced_hidden_size_actor=ADVANCED_HIDDEN_SIZE_ACTOR,
+        simple_layers_critic=SIMPLE_LAYERS_CRITIC,
+        simple_hidden_critic=SIMPLE_HIDDEN_CRITIC,
+        advanced_hidden_sizes_critic=ADVANCED_HIDDEN_SIZE_CRITIC,
+        critic_encoder=CRITIC_ENCODE,
+        logger_path=LOGGER_PATH_AGENT,
+        file_name_log=LOGGER_FILE_NAME_AGENT
+    )
+
+    # train
+    train_Agent(
+        env=env,
+        agent=agent,
+        logger=logger,
+        EPISODES=EPISODES,
+        MAX_STEPS=MAX_STEPS,
+        BATCH_SIZE=BATCH_SIZE,
+        CHECKPOINT_PATH=CHECKPOINT_PATH,
+        AUTO_SAVE_EVERY=AUTO_SAVE_EVERY,
+        LOGGIN_STATUS_EP=LOGGIN_STATUS_EP
+        ,FINAL_MODEL_PATH=FINAL_MODEL_PATH
+    )
