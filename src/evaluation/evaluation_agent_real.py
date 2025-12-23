@@ -7,14 +7,14 @@ from src.environment.Apply_real_env import Real_env_remote
 import time
 import matplotlib.pyplot as plt
 
-env = Real_env_remote(ip_host="192.168.100",
+env = Real_env_remote(ip_host="192.168.1.100",
                     port=502,
                     min_action = 0,
-                    max_action = 24,
+                    max_action = 10,
                     setpoint= 5,
                     delay_of_action = 0.2,
-                    address_sensor=0x000,
-                    address_actuator=0x000,
+                    address_sensor=1,
+                    address_actuator=1025,
                     )
 state = env.reset()
 
@@ -30,8 +30,8 @@ print("Action range:", min_action, max_action)
 agent = SACAgent(
     state_dim=state_dim,
     action_dim=action_dim,
-    min_action=min_action,
-    max_action=max_action,
+    min_action=np.array([min_action]),
+    max_action=np.array([max_action]),
     lr=3e-4,
     gamma=0.99,
     tau=0.005,
@@ -39,9 +39,9 @@ agent = SACAgent(
     logger_status=True
 )
 
-final_model_path = r"D:\Project_end\New_world\my_project\models\Test_train_real.pt"
+final_model_path = r"D:\Project_end\New_world\my_project\models\checkpoint\sac_checkpoint.pt"
 agent.load_model(path=final_model_path)
-max_steps = 2000
+max_steps = 500
 state ,info= env.reset()
 current_setpoint = info.get("setpoint", None)
 states = []
@@ -51,6 +51,7 @@ rewards = []
 for step in range(max_steps):
 
     action = agent.select_action(state)
+    print(action)
     next_state, reward, done, info = env.step(action = action)
    
     states.append(state)
