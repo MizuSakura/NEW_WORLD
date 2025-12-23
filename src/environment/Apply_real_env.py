@@ -3,12 +3,6 @@ from src.environment.reward_function_control import Reward_manager
 import numpy as np
 import time
 
-class Real_env_remote():
-    from src.utils.comucation_modbusTCP import ModbusTCP
-from src.environment.reward_function_control import Reward_manager
-import numpy as np
-import time
-
 
 class Real_env_remote:
     """
@@ -74,6 +68,7 @@ class Real_env_remote:
     
     def reset(self):
         level = self.read_sensor(self.address_sensor)
+        self.setpoint = np.random.uniform(0,10)
 
         # assume actuator holds current state initially
         if self.prev_action is None:

@@ -15,7 +15,7 @@ class RCTankEnv(gym.Env):
         control_mode="voltage",
         setpoint_level=5.0,
         level_max=10.0,
-        max_action_volt=24.0,
+        max_action_volt=10.0,
         max_action_current=5.0,
         render_mode=None,
     ):

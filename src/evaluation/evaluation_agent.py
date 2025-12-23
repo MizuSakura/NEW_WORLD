@@ -71,7 +71,7 @@ agent = SACAgent(
     logger_status=True
 )
 
-final_model_path = r"D:\Project_end\New_world\my_project\models\sac_checkpoint.pt"
+final_model_path = r"D:\Project_end\New_world\my_project\models\sac_checkpoint_real.pt"
 agent.load_model(path=final_model_path)
 
 test_returns, test_traj = test_agent(env, agent, episodes=5, max_steps=200)
