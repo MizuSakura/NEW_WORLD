@@ -261,7 +261,7 @@ class ParquetPlotter:
 if __name__ == "__main__":
     BASE_DIR = Path(__file__).resolve().parents[2]
     FILE_CONFIG = BASE_DIR / "config" / "config_color_SAC.yaml"
-    FILE_OR_FOLDER_DATA = r"D:\Project_end\New_world\my_project\logs\agent\RC_Tank\optimized__1.parquet"
+    FILE_OR_FOLDER_DATA = r"D:\Project_end\New_world\my_project\logs\agent_train_real\optimized__215.parquet"
     LAOUT_MODE = "auto" # "manual" , "auto"
     ROWS =  2
     COLUMNS = 2
