@@ -2,15 +2,34 @@ import numpy as np
 from scipy.signal import sawtooth
 
 class SignalGenerator:
-    """
-    Generate various test input signals for simulation such as 
-    PWM, step, ramp, impulse, sinusoidal, and triangle waveforms.
-    """
 
     def __init__(self, t_end=10.0, dt=0.01):
-        """Initialize the signal generator with a time vector."""
-        self.dt = dt                      # ✅ add this line
+        self.dt = dt
         self.t = np.arange(0, t_end, dt)
+
+        self._signal_map = {
+            "pwm": self.pwm,
+            "step": self.step,
+            "ramp": self.ramp,
+            "impulse": self.impulse,
+            "sinusoid": self.sinusoid,
+            "sine": self.sinusoid,
+            "triangle": self.triangle,
+        }
+
+    def generate_from_config(self, config: dict):
+        if "type" not in config:
+            raise ValueError("Signal config missing 'type'")
+        if "params" not in config:
+            raise ValueError("Signal config missing 'params'")
+
+        signal_type = config["type"]
+        params = config["params"]
+
+        if signal_type not in self._signal_map:
+            raise ValueError(f"Unsupported signal type: {signal_type}")
+
+        return self._signal_map[signal_type](**params)
 
     # ======================================================================
     # PWM SIGNAL
