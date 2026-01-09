@@ -6,7 +6,7 @@ from pathlib import Path
 from src.environment.RCTankEnv_gym import RCTankEnv
 
 
-def test_agent(env, agent, episodes=20, max_steps=1000):
+def test_agent(env, agent, episodes=20, max_steps=3000):
     returns = []
     trajectories = []   # เก็บ state/action/reward เพื่อนำไป plot
 
@@ -77,7 +77,7 @@ agent.load_model(path=final_model_path)
 test_returns, test_traj = test_agent(env, agent, episodes=5, max_steps=200)
 plt.figure(figsize=(12,4))
 plt.plot(test_traj[1]["rewards"], label="Reward per step")
-plt.title("Reward curve (Test Episode 1)")
+plt.title("Reward curve (Test Episode 5)")
 plt.xlabel("Step")
 plt.ylabel("Reward")
 plt.grid(True)
@@ -85,8 +85,8 @@ plt.legend()
 plt.show()
 
 plt.figure(figsize=(12,4))
-plt.plot(test_traj[1]["actions"], label="Action", alpha=0.7)
-plt.title("Action output (Test Episode 1)")
+plt.plot(test_traj[4]["actions"], label="Action", alpha=0.7)
+plt.title("Action output (Test Episode 5)")
 plt.xlabel("Step")
 plt.ylabel("Action Value")
 plt.grid(True)
@@ -94,8 +94,8 @@ plt.legend()
 plt.show()
 
 plt.figure(figsize=(12,4))
-plt.plot(test_traj[1]["states"])
-plt.title("State trajectory (Test Episode 1)")
+plt.plot(test_traj[4]["states"])
+plt.title("State trajectory (Test Episode 5)")
 plt.xlabel("Step")
 plt.ylabel("State Value")
 plt.grid(True)
