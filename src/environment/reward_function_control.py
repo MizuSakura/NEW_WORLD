@@ -1,3 +1,4 @@
+#my_project\src\environment\reward_function_control.py
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -21,7 +22,7 @@ class Reward_manager:
 
         # Reward weights
         self.w_error = 1.0
-        self.w_smooth = 0.1
+        self.w_smooth = 0.5
         self.w_stability = 0.5
 
         # Pointer & counter
