@@ -1,9 +1,13 @@
+#D:\Project_end\New_world\my_project\src\evaluation\evaluation_agent.py
 import numpy as np
 import matplotlib.pyplot as plt
 from src.agent.SAC_Agent import SACAgent
 import gymnasium as gym
 from pathlib import Path
 from src.environment.RCTankEnv_gym import RCTankEnv
+from src.environment.noise_manager import NoiseManager
+
+noise_manager = NoiseManager(enabled=False)
 
 
 def test_agent(env, agent, episodes=20, max_steps=3000):
@@ -47,6 +51,10 @@ def test_agent(env, agent, episodes=20, max_steps=3000):
 
     return returns, trajectories
 
+env = RCTankEnv(
+    render_mode="human",
+    noise_manager=noise_manager
+)
 env = RCTankEnv(render_mode="human")
 
 state, _ = env.reset()
@@ -71,7 +79,7 @@ agent = SACAgent(
     logger_status=True
 )
 
-final_model_path = r"D:\Project_end\New_world\my_project\models\sac_checkpoint_real.pt"
+final_model_path = r"D:\Project_end\New_world\my_project\models\Test_histrory.pt"
 agent.load_model(path=final_model_path)
 
 test_returns, test_traj = test_agent(env, agent, episodes=5, max_steps=200)
