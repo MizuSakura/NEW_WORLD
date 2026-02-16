@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from pathlib import Path
 
 from src.agent.network import  Actor, Critic
-from src.agent.replaybuffer import Vanilla_ReplayBuffer
+from src.agent.replaybuffer_manager import ReplayBufferManager
 from  src.utils.logger_pyarrow import MetricLogger
 
 class SACAgent:
@@ -87,10 +87,16 @@ class SACAgent:
         self.critic_opt = torch.optim.Adam(self.critic.parameters(), lr=lr)
 
         # Replay buffer
-        self.replay_buffer = Vanilla_ReplayBuffer(
-            state_dim, action_dim,
-            capacity=replay_capacity,
-            device=self.device
+        self.replay_buffer = ReplayBufferManager(
+        buffer_type="nstep_per",
+        state_dim=state_dim,
+        action_dim=action_dim,
+        capacity=200000,
+        n_step=3,
+        gamma=0.99,
+        alpha=0.6,
+        beta=0.4,
+        device=self.device
         )
 
         # Hyperparameters
@@ -138,38 +144,86 @@ class SACAgent:
         if len(self.replay_buffer) < batch_size:
             return
 
-        state, action, reward, next_state, done = self.replay_buffer.sample(batch_size)
-        state, action, reward, next_state, done = [
-            x.to(self.device) for x in (state, action, reward, next_state, done)
-        ]
+        sample = self.replay_buffer.sample(batch_size)
+
+        if len(sample) == 5:
+            state, action, reward, next_state, done = sample
+            indices, is_weights = None, None
+        else:
+            state, action, reward, next_state, done, indices, is_weights = sample
 
         # ------------------------------------------------------------
-        # Compute target
+        # numpy / torch → torch (unified)
+        # ------------------------------------------------------------
+        def to_tensor(x):
+            if torch.is_tensor(x):
+                return x.to(self.device)
+            return torch.as_tensor(x, dtype=torch.float32, device=self.device)
+
+        state      = to_tensor(state)
+        action     = to_tensor(action)
+        reward     = to_tensor(reward)
+        next_state = to_tensor(next_state)
+        done       = to_tensor(done)
+
+        if is_weights is not None:
+            is_weights = to_tensor(is_weights)
+
+        # ------------------------------------------------------------
+        # Target Q (⚠️ N-step aware)
         # ------------------------------------------------------------
         with torch.no_grad():
             next_action, next_logp = self.actor.sample(next_state)
-
             q1_t, q2_t = self.target_critic(next_state, next_action)
             q_min = torch.min(q1_t, q2_t)
 
-            target_q = reward + (1 - done) * self.gamma * (q_min - self.alpha * next_logp)
+            # IMPORTANT:
+            # reward จาก n-step buffer คือ R_n แล้ว → ไม่คูณ gamma ซ้ำ
+            target_q = reward + (1.0 - done) * (
+                q_min - self.alpha * next_logp
+            )
+
+            # numerical safety
+            target_q = torch.clamp(target_q, -1e6, 1e6)
 
         # ------------------------------------------------------------
         # Critic update
         # ------------------------------------------------------------
         q1, q2 = self.critic(state, action)
-        critic_loss = F.mse_loss(q1, target_q) + F.mse_loss(q2, target_q)
+
+        td_error1 = q1 - target_q
+        td_error2 = q2 - target_q
+        td_error = 0.5 * (td_error1.abs() + td_error2.abs())
+
+        if is_weights is not None:
+            critic_loss = (
+                is_weights * (td_error1.pow(2) + td_error2.pow(2))
+            ).mean()
+        else:
+            critic_loss = F.mse_loss(q1, target_q) + F.mse_loss(q2, target_q)
 
         self.critic_opt.zero_grad()
         critic_loss.backward()
         self.critic_opt.step()
 
         # ------------------------------------------------------------
-        # Actor update
+        # Update priorities (PER-safe)
+        # ------------------------------------------------------------
+        if indices is not None:
+            safe_td = torch.clamp(td_error, 0.0, 1e6)
+            self.replay_buffer.update_priorities(
+                indices, safe_td.detach().squeeze(-1)
+            )
+
+        # ------------------------------------------------------------
+        # Actor update (guard NaN)
         # ------------------------------------------------------------
         a_pi, log_pi = self.actor.sample(state)
         q1_pi, q2_pi = self.critic(state, a_pi)
         q_pi = torch.min(q1_pi, q2_pi)
+
+        if torch.isnan(q_pi).any() or torch.isnan(log_pi).any():
+            return  # skip unstable step
 
         actor_loss = (self.alpha * log_pi - q_pi).mean()
 
@@ -187,7 +241,6 @@ class SACAgent:
         # Logging
         # ------------------------------------------------------------
         if self.logger_status:
-            
             self.logger.log("loss_actor", actor_loss.item())
             self.logger.log("loss_critic", critic_loss.item())
             self.logger.log("q1_mean", q1.mean().item())
