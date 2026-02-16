@@ -1,9 +1,12 @@
+# D:\Project_end\New_world\my_project\src\environment\RCTankEnv_gym.py
 import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
 import pygame
 from collections import deque
 
+from src.environment.noise_manager import NoiseManager
+from src.environment.reward_function_control import Reward_manager
 
 class RCTankEnv(gym.Env):
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 30}
@@ -19,6 +22,7 @@ class RCTankEnv(gym.Env):
         max_action_volt=10.0,
         max_action_current=5.0,
         render_mode=None,
+        noise_manager: NoiseManager = None,   
     ):
         super().__init__()
         self.R = R
@@ -30,6 +34,9 @@ class RCTankEnv(gym.Env):
         self.max_volt = max_action_volt
         self.max_current = max_action_current
         self.render_mode = render_mode
+
+        # ===== Noise =====
+        self.noise = noise_manager
 
         # ===== Action history for STATE ONLY =====
         self.action_history_len = 10
@@ -80,9 +87,14 @@ class RCTankEnv(gym.Env):
         self.width = 800
         self.height = 450
 
-        # ===== Graph Data (USED BY RENDER) =====
+        # ===== Graph Data =====
         self.level_history = []
         self.action_history = []
+
+         # -----------------------------
+        # Reward Manager
+        # -----------------------------
+        self.reward_manager = Reward_manager(buffer_size=5)
 
     # =====================================================
     # RESET
@@ -95,12 +107,13 @@ class RCTankEnv(gym.Env):
         self.time = 0.0
         self.done = 0.0
 
-        # reset action history (state)
+        if self.noise is not None:
+            self.noise.reset()
+
         self.prev_actions.clear()
         for _ in range(self.action_history_len):
             self.prev_actions.append(0.0)
 
-        # reset render histories
         self.level_history = [self.level]
         self.action_history = []
 
@@ -108,6 +121,13 @@ class RCTankEnv(gym.Env):
             [self.level] + list(self.prev_actions) + [self.setpoint],
             dtype=np.float32
         )
+        init_action = 0.0
+        self.reward_manager.reset(
+            init_setpoint=self.setpoint,
+            init_state=self.level,
+            init_action=init_action,
+        )
+        
         info = {"setpoint": self.setpoint}
         return obs, info
 
@@ -119,6 +139,14 @@ class RCTankEnv(gym.Env):
             action_val = float(action.item())
         else:
             action_val = float(action)
+        
+         # ===== Noise schedule step =====
+        if self.noise is not None:
+            self.noise.step()   
+
+        # -------- Action Noise --------
+        if self.noise is not None:
+            action_val = self.noise.apply_action_noise(action_val)
 
         # -------- System Dynamics --------
         if self.mode == "voltage":
@@ -130,24 +158,38 @@ class RCTankEnv(gym.Env):
             net_flow = action_val - (self.level / self.R)
             d_level = (net_flow / self.C) * self.dt
 
+        # -------- Process Noise --------
+        if self.noise is not None:
+            d_level = self.noise.apply_process_noise(d_level)
+
         self.level = np.clip(self.level + d_level, 0, self.level_max)
         self.time += self.dt
 
         # -------- Store histories --------
-        self.prev_actions.append(action_val)      # state history
-        self.level_history.append(self.level)     # render
-        self.action_history.append(action_val)    # render
+        self.prev_actions.append(action_val)
+        self.level_history.append(self.level)
+        self.action_history.append(action_val)
 
-        # -------- Observation --------
+        # -------- Observation (Sensor Noise) --------
+        observed_level = self.level
+        if self.noise is not None:
+            observed_level = self.noise.apply_sensor_noise(observed_level)
+
         obs = np.array(
-            [self.level] + list(self.prev_actions) + [self.setpoint],
+            [observed_level] + list(self.prev_actions) + [self.setpoint],
             dtype=np.float32
         )
 
         # -------- Reward --------
         error = abs(self.setpoint - self.level)
-        reward = -error
+         # -------- Reward (TRUE STATE, managed) --------
+        self.reward_manager.update(
+            setpoint=self.setpoint,
+            state=self.level,      # TRUE state (no noise)
+            action=action_val,
+        )
 
+        reward = self.reward_manager.reward_continuous_control()
         # -------- Termination --------
         if error < 0.05:
             self.done += self.dt
@@ -159,7 +201,6 @@ class RCTankEnv(gym.Env):
         info = {"setpoint": self.setpoint}
 
         return obs, reward, terminated, truncated, info
-
     # =====================================================
     # RENDER  (COPIED 1:1 FROM USER)
     # =====================================================
