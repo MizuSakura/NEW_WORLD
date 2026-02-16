@@ -6,13 +6,56 @@ import numpy as np
 from pathlib import Path
 import src.environment.register_envs
 from src.utils.logger_pyarrow import EpisodeLogger
-
+from src.environment.noise_manager import (
+    NoiseManager,
+    GaussianNoise,
+    BoundedGaussianNoise,
+    OUNoise,
+    ScheduledNoise,
+    NormalCurveScheduler,
+)
 
 # ======================================================
 # Environment setup
 # ======================================================
 def env_setup(name_env="RCTankEnv-v0", render_mode="human"):
-    env = gym.make(name_env, render_mode=render_mode)
+    scheduler = NormalCurveScheduler(
+        peak=3000,   # จุดพีค noise
+        std=1500,         # ความกว้างโค้ง
+        max_scale=1.0
+    )
+
+    action_noise = ScheduledNoise(
+        noise=OUNoise(
+            mu=0.0,
+            theta=0.15,
+            sigma=0.25,   # sigma สูงสุด
+            dt=0.1,
+        ),
+        scheduler=scheduler
+    )
+
+    process_noise = ScheduledNoise(
+        GaussianNoise(sigma=0.02),
+        scheduler
+    )
+
+    noise_manager = NoiseManager(
+        action_noise=action_noise,
+        process_noise=process_noise,
+        sensor_noise=BoundedGaussianNoise(
+            sigma=0.02,
+            clip=0.05
+        ),
+        enabled=True,
+    )
+
+
+    env = gym.make(
+        name_env,
+        render_mode=render_mode,
+        noise_manager=noise_manager,  
+    )
 
     state, _ = env.reset()
     state_dim = state.shape[0]
@@ -56,15 +99,20 @@ def train_Agent(
     for ep in range(start_episode, EPISODES + 1):
 
         state, info = env.reset()
+
+        if hasattr(env, "noise_manager") and env.noise_manager is not None:
+            env.noise_manager.on_episode_start(ep)
+
         current_setpoint = info.get("setpoint", None)
         episode_reward = 0.0
 
         for step in range(MAX_STEPS):
 
-            # (1) Select action
             action = agent.select_action(state)
 
-            # (2) Environment step
+            if hasattr(env, "noise_manager") and env.noise_manager is not None:
+                env.noise_manager.step()
+
             next_state, reward, terminated, truncated, info = env.step(action)
             env.render()
 
@@ -146,13 +194,14 @@ if __name__ == "__main__":
 
     LOGGER_PATH_AGENT = r"D:\Project_end\New_world\my_project\logs\agent\RC_Tank"
     LOGGER_FILE_NAME_AGENT = "optimized_"
+    FILE_NAME_AUTO_SAVE = "Autosave"
 
     # auto save
     CHECKPOINT_PATH = Path(
-        r"D:\Project_end\New_world\my_project\models\checkpoint\sac_checkpoint.pt"
+        r"D:\Project_end\New_world\my_project\models\checkpoint\Autosave.pt"
     )
     AUTO_SAVE_EVERY = 10
-    FINAL_MODEL_PATH =  r"D:\Project_end\New_world\my_project\models\Test_Acrobot-v1.pt"
+    FINAL_MODEL_PATH =  r"D:\Project_end\New_world\my_project\models\Test_histrory.pt"
 
     # logger
     logger = EpisodeLogger(
