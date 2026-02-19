@@ -113,7 +113,8 @@ class RCTankEnv(gym.Env):
         self.screen = None
         self.clock = None
         self.width = 900
-        self.height = 450
+        self.height = 470
+        self.mode_plot = "auto" #fixed
 
         # ===== Graph Data =====
         self.level_history = []
@@ -292,8 +293,9 @@ class RCTankEnv(gym.Env):
         info = {"setpoint": self.setpoint}
 
         return obs, reward, terminated, truncated, info
+    
     # =====================================================
-    # RENDER  (COPIED 1:1 FROM USER)
+    # RENDER  (Enhanced with Dynamic Current Value Marker)
     # =====================================================
     def render(self):
         if self.render_mode is None:
@@ -319,13 +321,13 @@ class RCTankEnv(gym.Env):
         self.screen.fill((245, 245, 245))
 
         # =================================================
-        # Compute reward metrics
+        # Reward metrics
         # =================================================
         current_reward = self.reward_history[-1] if self.reward_history else 0.0
         cumulative_reward = np.sum(self.reward_history) if self.reward_history else 0.0
 
         # =================================================
-        # Global Header
+        # Header
         # =================================================
         header_items = [
             f"Level: {self.level:.2f}/{self.level_max:.1f}",
@@ -350,7 +352,6 @@ class RCTankEnv(gym.Env):
         pygame.draw.rect(self.screen, (60, 60, 60),
                         (tank_x, tank_y, tank_w, tank_h), 3)
 
-        # Title
         title = self.font_medium.render("Water Tank", True, (20, 20, 20))
         self.screen.blit(title, (tank_x, tank_y - 28))
 
@@ -363,21 +364,19 @@ class RCTankEnv(gym.Env):
             (tank_x + 3, tank_y + tank_h - water_h, tank_w - 6, water_h)
         )
 
-        # Setpoint line
         sp_ratio = np.clip(self.setpoint / self.level_max, 0, 1)
         sp_y = tank_y + tank_h - (tank_h * sp_ratio)
         pygame.draw.line(self.screen, (0, 200, 0),
                         (tank_x, sp_y), (tank_x + tank_w, sp_y), 3)
 
         # =================================================
-        # Graph Panel
+        # Graph Layout
         # =================================================
         graph_x, graph_y = 270, 90
         graph_w, graph_h = 560, 340
         gap = 25
         panel_h = (graph_h - 2 * gap) // 3
 
-        # Panel positions
         level_y = graph_y
         action_y = graph_y + panel_h + gap
         reward_y = graph_y + 2 * (panel_h + gap)
@@ -385,32 +384,27 @@ class RCTankEnv(gym.Env):
         # Titles
         self.screen.blit(self.font_medium.render("Level History", True, (20, 20, 20)),
                         (graph_x, level_y - 25))
-
         self.screen.blit(self.font_medium.render("Action History", True, (20, 20, 20)),
                         (graph_x, action_y - 25))
-
         self.screen.blit(self.font_medium.render("Reward History", True, (20, 20, 20)),
                         (graph_x, reward_y - 25))
 
-        # Panel frames
+        # Frames
         pygame.draw.rect(self.screen, (80, 80, 80),
                         (graph_x, level_y, graph_w, panel_h), 2)
-
         pygame.draw.rect(self.screen, (80, 80, 80),
                         (graph_x, action_y, graph_w, panel_h), 2)
-
         pygame.draw.rect(self.screen, (80, 80, 80),
                         (graph_x, reward_y, graph_w, panel_h), 2)
 
         # =================================================
-        # Grid function
+        # Grid helper
         # =================================================
         def draw_grid(x, y, w, h, y_max, y_min=0, zero_line=False):
             for i in range(6):
                 yy = y + h - i * (h / 5)
                 pygame.draw.line(self.screen, (220, 220, 220),
                                 (x, yy), (x + w, yy), 1)
-
                 val = y_min + (i / 5) * (y_max - y_min)
                 txt = self.font_small.render(f"{val:.2f}", True, (100, 100, 100))
                 self.screen.blit(txt, (x - 45, yy - 7))
@@ -419,16 +413,90 @@ class RCTankEnv(gym.Env):
                 zero_y = y + h - ((0 - y_min) / (y_max - y_min)) * h
                 pygame.draw.line(self.screen, (150, 150, 150),
                                 (x, zero_y), (x + w, zero_y), 1)
+        
+        def draw_time_grid(
+                x, y, w, h,
+                history_len,
+                show_label=True,
+                mode="auto",          # "auto" หรือ "fixed"
+                fixed_interval=2.0    # ใช้เมื่อ mode="fixed"
+            ):
 
-        # =================================================
-        # Plot Level + Stability Band
-        # =================================================
+            if history_len < 2:
+                return
+
+            # =========================
+            # กำหนดช่วงเวลา interval
+            # =========================
+            if mode == "fixed":
+                interval = fixed_interval
+
+            else:  # AUTO MODE
+                total_time = history_len * self.dt
+
+                if total_time <= 10:
+                    interval = 1.0
+                elif total_time <= 30:
+                    interval = 2.0
+                elif total_time <= 60:
+                    interval = 5.0
+                else:
+                    interval = 10.0
+
+            steps_per_mark = max(1, int(interval / self.dt))
+
+            # =========================
+            # วาด grid
+            # =========================
+            for i in range(history_len):
+
+                x_pos = x + i
+
+                # ----- Major grid -----
+                if i % steps_per_mark == 0:
+
+                    pygame.draw.line(
+                        self.screen,
+                        (205, 205, 205),
+                        (x_pos, y),
+                        (x_pos, y + h),
+                        1
+                    )
+
+                    if show_label:
+                        time_sec = i * self.dt
+
+                        label = self.font_small.render(
+                            f"{time_sec:.0f}s",
+                            True,
+                            (110, 110, 110)
+                        )
+
+                        text_rect = label.get_rect()
+                        text_rect.center = (x_pos, y + h + 18)
+                        self.screen.blit(label, text_rect)
+
+                # ----- Minor grid -----
+                else:
+                    pygame.draw.line(
+                        self.screen,
+                        (245, 245, 245),
+                        (x_pos, y),
+                        (x_pos, y + h),
+                        1
+                    )
+
         max_points = min(len(self.level_history), graph_w)
 
+        # =================================================
+        # LEVEL PANEL
+        # =================================================
         if max_points > 1:
             lv = self.level_history[-max_points:]
             xs = [graph_x + i for i in range(len(lv))]
+            ys = [level_y + panel_h - (v / self.level_max) * panel_h for v in lv]
 
+            # ---- Stability Band ----
             margin = 0.02 * self.setpoint
             upper = self.setpoint + margin
             lower = self.setpoint - margin
@@ -436,39 +504,104 @@ class RCTankEnv(gym.Env):
             band_top = level_y + panel_h - (upper / self.level_max) * panel_h
             band_bottom = level_y + panel_h - (lower / self.level_max) * panel_h
 
-            pygame.draw.rect(self.screen, (200, 0, 0),
-                            (graph_x, band_top, graph_w,
-                            band_bottom - band_top))
+            pygame.draw.rect(
+                self.screen,
+                (255, 220, 220),
+                (graph_x, band_top, graph_w, band_bottom - band_top)
+            )
 
+            # ---- Grid ----
+            draw_time_grid(graph_x, level_y, graph_w, panel_h, len(lv), show_label=False,mode= self.mode_plot)
             draw_grid(graph_x, level_y, graph_w, panel_h, self.level_max)
+            
 
-            ys = [level_y + panel_h - (v / self.level_max) * panel_h for v in lv]
+            # ---- Setpoint Line (สำคัญ!) ----
+            sp_y_graph = level_y + panel_h - (self.setpoint / self.level_max) * panel_h
+            pygame.draw.line(
+                self.screen,
+                (0, 180, 0),
+                (graph_x, sp_y_graph),
+                (graph_x + graph_w, sp_y_graph),
+                2
+            )
 
-            pygame.draw.lines(self.screen, (0, 70, 200),
-                            False, list(zip(xs, ys)), 2)
+            # ---- Level Line ----
+            pygame.draw.lines(
+                self.screen,
+                (0, 70, 200),
+                False,
+                list(zip(xs, ys)),
+                2
+            )
 
+            # ---- Current marker ----
+            last_x, last_y = xs[-1], ys[-1]
+            current_level = lv[-1]
+
+            pygame.draw.circle(
+                self.screen,
+                (0, 70, 200),
+                (int(last_x), int(last_y)),
+                5
+            )
+
+            # Guide lines
+            pygame.draw.line(self.screen, (160, 160, 160),
+                            (graph_x, last_y),
+                            (graph_x + graph_w, last_y), 1)
+
+            pygame.draw.line(self.screen, (160, 160, 160),
+                            (last_x, level_y),
+                            (last_x, level_y + panel_h), 1)
+
+            # Value label
+            label = self.font_small.render(
+                f"{current_level:.2f}",
+                True,
+                (0, 70, 200)
+            )
+            error = self.setpoint - self.level
+            error_text = self.font_small.render(f"Error: {error:.3f}", True, (200, 50, 50))
+            self.screen.blit(error_text, (graph_x + graph_w + 5, last_y + 10))
+            self.screen.blit(label, (graph_x + graph_w + 10, last_y - 7))
         # =================================================
-        # Plot Action
+        # ACTION PANEL
         # =================================================
         if len(self.action_history) > 1:
             act = self.action_history[-max_points:]
             action_max = self.max_volt if self.mode == "voltage" else self.max_current
 
+            draw_time_grid(graph_x, action_y, graph_w, panel_h, len(act),show_label=False,mode= self.mode_plot)
             draw_grid(graph_x, action_y, graph_w, panel_h, action_max)
 
             xs = [graph_x + i for i in range(len(act))]
-            ys = [
-                action_y + panel_h - (a / action_max) * panel_h
-                for a in act
-            ]
+            ys = [action_y + panel_h - (a / action_max) * panel_h for a in act]
 
             pygame.draw.lines(self.screen, (200, 40, 40),
                             False, list(zip(xs, ys)), 2)
 
+            last_x, last_y = xs[-1], ys[-1]
+            current_action = act[-1]
+
+            pygame.draw.circle(self.screen, (200, 40, 40),
+                            (int(last_x), int(last_y)), 5)
+
+            pygame.draw.line(self.screen, (150, 150, 150),
+                            (graph_x, last_y),
+                            (graph_x + graph_w, last_y), 1)
+
+            pygame.draw.line(self.screen, (150, 150, 150),
+                            (last_x, action_y),
+                            (last_x, action_y + panel_h), 1)
+
+            label = self.font_small.render(f"{current_action:.2f}", True, (200, 40, 40))
+            self.screen.blit(label, (graph_x + graph_w + 5, last_y - 7))
+
         # =================================================
-        # Plot Reward + Cumulative overlay
+        # REWARD PANEL (show cumulative value only)
         # =================================================
         if len(self.reward_history) > 1:
+
             rw = self.reward_history[-max_points:]
             r_min = min(rw)
             r_max = max(rw)
@@ -476,6 +609,7 @@ class RCTankEnv(gym.Env):
             if abs(r_max - r_min) < 1e-6:
                 r_max += 1e-6
 
+            draw_time_grid(graph_x, reward_y, graph_w, panel_h, len(rw),show_label=True,)
             draw_grid(graph_x, reward_y, graph_w, panel_h,
                     r_max, r_min, zero_line=True)
 
@@ -486,16 +620,60 @@ class RCTankEnv(gym.Env):
                 for r in rw
             ]
 
-            pygame.draw.lines(self.screen, (120, 0, 160),
-                            False, list(zip(xs, ys)), 2)
-
-            # --- cumulative reward text inside panel ---
-            cum_text = self.font_small.render(
-                f"Cumulative: {cumulative_reward:.2f}",
-                True,
-                (80, 0, 120)
+            # ---- reward line ----
+            pygame.draw.lines(
+                self.screen,
+                (120, 0, 160),
+                False,
+                list(zip(xs, ys)),
+                2
             )
-            self.screen.blit(cum_text, (graph_x + 10, reward_y + 10))
+
+            # ---- current marker ----
+            last_x = xs[-1]
+            last_y = ys[-1]
+            current_reward = rw[-1]
+            cumulative_reward = np.sum(self.reward_history)
+
+            pygame.draw.circle(
+                self.screen,
+                (120, 0, 160),
+                (int(last_x), int(last_y)),
+                5
+            )
+
+            # guide vertical line
+            pygame.draw.line(
+                self.screen,
+                (160, 160, 160),
+                (last_x, reward_y),
+                (last_x, reward_y + panel_h),
+                1
+            )
+
+            # ---- reward label ----
+            reward_label = self.font_small.render(
+                f"R: {current_reward:.3f}",
+                True,
+                (120, 0, 160)
+            )
+            self.screen.blit(
+                reward_label,
+                (graph_x + graph_w + 5, last_y - 15)
+            )
+
+            # ---- cumulative label (อยู่ใต้ reward) ----
+            cum_label = self.font_small.render(
+                f"CUM: {cumulative_reward:.2f}",
+                True,
+                (255, 140, 0)
+            )
+            self.screen.blit(
+                cum_label,
+                (graph_x + graph_w + 5, last_y + 2)
+            )
+
+            
 
         pygame.display.flip()
 
