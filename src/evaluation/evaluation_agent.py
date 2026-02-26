@@ -76,13 +76,13 @@ agent = SACAgent(
     gamma=0.99,
     tau=0.005,
     alpha=0.4,
-    logger_status=True
+    logger_status=False
 )
 
-final_model_path = r"D:\Project_end\New_world\my_project\models\Test_histrory.pt"
+final_model_path = r"D:\Project_end\New_world\my_project\models\checkpoint\Autosave.pt"
 agent.load_model(path=final_model_path)
 
-test_returns, test_traj = test_agent(env, agent, episodes=5, max_steps=200)
+test_returns, test_traj = test_agent(env, agent, episodes=10, max_steps=500)
 plt.figure(figsize=(12,4))
 plt.plot(test_traj[1]["rewards"], label="Reward per step")
 plt.title("Reward curve (Test Episode 5)")
