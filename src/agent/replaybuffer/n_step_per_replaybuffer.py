@@ -16,7 +16,7 @@ class NStepPERReplayBuffer:
         capacity: int,
         state_dim: int,
         action_dim: int,
-        n_step: int = 3,
+        n_step: int = 5,
         gamma: float = 0.99,
         alpha: float = 0.6,
         beta: float = 0.4,
