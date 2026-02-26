@@ -6,6 +6,7 @@ import pygame
 from collections import deque
 import os
 from pathlib import Path
+import yaml
 
 from src.environment.noise_manager import NoiseManager
 from src.environment.reward_function_control import Reward_manager
@@ -27,7 +28,8 @@ class RCTankEnv(gym.Env):
         save_episode_image: bool = True,
         save_dir: str = r"D:\Project_end\New_world\my_project\logs\image_log",
         noise_manager: NoiseManager = None,
-        use_pid_state: bool = True   
+        use_pid_state: bool = True,
+        reward_type: str = "control_v1"   #[ "continuous" , "hybrid" ,control_v1]
     ):
         super().__init__()
         self.R = R
@@ -110,11 +112,12 @@ class RCTankEnv(gym.Env):
         self.reward_monitor = 0
 
         # ===== GUI =====
+        self.render_scale = 3 
         self.screen = None
         self.clock = None
         self.width = 900
         self.height = 470
-        self.mode_plot = "auto" #fixed
+        self.mode_plot = "fixed" #auto
 
         # ===== Graph Data =====
         self.level_history = []
@@ -123,12 +126,14 @@ class RCTankEnv(gym.Env):
 
         self.save_episode_image = save_episode_image
         self.save_dir = save_dir
-        self.episode_count = 0
+        self._init_episode_counter_from_folder()
+        
 
          # -----------------------------
         # Reward Manager
         # -----------------------------
         self.reward_manager = Reward_manager(buffer_size=5,mode="adaptive")
+        self.reward_type = reward_type
 
     # =====================================================
     # RESET
@@ -138,7 +143,6 @@ class RCTankEnv(gym.Env):
 
         if self.save_episode_image and len(self.reward_history) > 0:
             self._save_render_image()
-            self.episode_count += 1
 
         self.level = float(self.np_random.uniform(0, self.level_max))
         self.setpoint = float(self.np_random.uniform(0, self.level_max))
@@ -277,7 +281,7 @@ class RCTankEnv(gym.Env):
             action=action_val,
         )
 
-        reward = self.reward_manager.reward_continuous_control()
+        reward = self.reward_manager.reward_type(self.reward_type)
 
         self.reward_history.append(reward)
         self.reward_monitor = reward
@@ -294,6 +298,7 @@ class RCTankEnv(gym.Env):
 
         return obs, reward, terminated, truncated, info
     
+
     # =====================================================
     # RENDER  (Enhanced with Dynamic Current Value Marker)
     # =====================================================
@@ -307,6 +312,7 @@ class RCTankEnv(gym.Env):
         if self.screen is None:
             pygame.init()
             self.screen = pygame.display.set_mode((self.width, self.height))
+            self._hires_surface = pygame.Surface((self.width * self.render_scale,self.height * self.render_scale))
             self.clock = pygame.time.Clock()
             self.font_small = pygame.font.SysFont("Arial", 12)
             self.font_medium = pygame.font.SysFont("Arial", 15)
@@ -397,95 +403,6 @@ class RCTankEnv(gym.Env):
         pygame.draw.rect(self.screen, (80, 80, 80),
                         (graph_x, reward_y, graph_w, panel_h), 2)
 
-        # =================================================
-        # Grid helper
-        # =================================================
-        def draw_grid(x, y, w, h, y_max, y_min=0, zero_line=False):
-            for i in range(6):
-                yy = y + h - i * (h / 5)
-                pygame.draw.line(self.screen, (220, 220, 220),
-                                (x, yy), (x + w, yy), 1)
-                val = y_min + (i / 5) * (y_max - y_min)
-                txt = self.font_small.render(f"{val:.2f}", True, (100, 100, 100))
-                self.screen.blit(txt, (x - 45, yy - 7))
-
-            if zero_line and y_min < 0 < y_max:
-                zero_y = y + h - ((0 - y_min) / (y_max - y_min)) * h
-                pygame.draw.line(self.screen, (150, 150, 150),
-                                (x, zero_y), (x + w, zero_y), 1)
-        
-        def draw_time_grid(
-                x, y, w, h,
-                history_len,
-                show_label=True,
-                mode="auto",          # "auto" หรือ "fixed"
-                fixed_interval=2.0    # ใช้เมื่อ mode="fixed"
-            ):
-
-            if history_len < 2:
-                return
-
-            # =========================
-            # กำหนดช่วงเวลา interval
-            # =========================
-            if mode == "fixed":
-                interval = fixed_interval
-
-            else:  # AUTO MODE
-                total_time = history_len * self.dt
-
-                if total_time <= 10:
-                    interval = 1.0
-                elif total_time <= 30:
-                    interval = 2.0
-                elif total_time <= 60:
-                    interval = 5.0
-                else:
-                    interval = 10.0
-
-            steps_per_mark = max(1, int(interval / self.dt))
-
-            # =========================
-            # วาด grid
-            # =========================
-            for i in range(history_len):
-
-                x_pos = x + i
-
-                # ----- Major grid -----
-                if i % steps_per_mark == 0:
-
-                    pygame.draw.line(
-                        self.screen,
-                        (205, 205, 205),
-                        (x_pos, y),
-                        (x_pos, y + h),
-                        1
-                    )
-
-                    if show_label:
-                        time_sec = i * self.dt
-
-                        label = self.font_small.render(
-                            f"{time_sec:.0f}s",
-                            True,
-                            (110, 110, 110)
-                        )
-
-                        text_rect = label.get_rect()
-                        text_rect.center = (x_pos, y + h + 18)
-                        self.screen.blit(label, text_rect)
-
-                # ----- Minor grid -----
-                else:
-                    pygame.draw.line(
-                        self.screen,
-                        (245, 245, 245),
-                        (x_pos, y),
-                        (x_pos, y + h),
-                        1
-                    )
-
         max_points = min(len(self.level_history), graph_w)
 
         # =================================================
@@ -511,8 +428,8 @@ class RCTankEnv(gym.Env):
             )
 
             # ---- Grid ----
-            draw_time_grid(graph_x, level_y, graph_w, panel_h, len(lv), show_label=False,mode= self.mode_plot)
-            draw_grid(graph_x, level_y, graph_w, panel_h, self.level_max)
+            self._draw_time_grid(graph_x, level_y, graph_w, panel_h, len(lv), show_label=False)
+            self._draw_grid(graph_x, level_y, graph_w, panel_h, self.level_max)
             
 
             # ---- Setpoint Line (สำคัญ!) ----
@@ -571,8 +488,8 @@ class RCTankEnv(gym.Env):
             act = self.action_history[-max_points:]
             action_max = self.max_volt if self.mode == "voltage" else self.max_current
 
-            draw_time_grid(graph_x, action_y, graph_w, panel_h, len(act),show_label=False,mode= self.mode_plot)
-            draw_grid(graph_x, action_y, graph_w, panel_h, action_max)
+            self._draw_time_grid(graph_x, action_y, graph_w, panel_h, len(act),show_label=False)
+            self._draw_grid(graph_x, action_y, graph_w, panel_h, action_max)
 
             xs = [graph_x + i for i in range(len(act))]
             ys = [action_y + panel_h - (a / action_max) * panel_h for a in act]
@@ -609,8 +526,8 @@ class RCTankEnv(gym.Env):
             if abs(r_max - r_min) < 1e-6:
                 r_max += 1e-6
 
-            draw_time_grid(graph_x, reward_y, graph_w, panel_h, len(rw),show_label=True,)
-            draw_grid(graph_x, reward_y, graph_w, panel_h,
+            self._draw_time_grid(graph_x, reward_y, graph_w, panel_h, len(rw),show_label=True)
+            self._draw_grid(graph_x, reward_y, graph_w, panel_h,
                     r_max, r_min, zero_line=True)
 
             xs = [graph_x + i for i in range(len(rw))]
@@ -682,6 +599,96 @@ class RCTankEnv(gym.Env):
         else:
             array = pygame.surfarray.array3d(self.screen)
             return np.transpose(array, (1, 0, 2))
+        
+    def _draw_grid(self, x, y, w, h, y_max, y_min=0, zero_line=False):
+
+        for i in range(6):
+            yy = y + h - i * (h / 5)
+
+            pygame.draw.line(
+                self.screen,
+                (220, 220, 220),
+                (x, yy),
+                (x + w, yy),
+                1
+            )
+
+            val = y_min + (i / 5) * (y_max - y_min)
+            txt = self.font_small.render(f"{val:.2f}", True, (100, 100, 100))
+            self.screen.blit(txt, (x - 45, yy - 7))
+
+        if zero_line and y_min < 0 < y_max:
+            zero_y = y + h - ((0 - y_min) / (y_max - y_min)) * h
+
+            pygame.draw.line(
+                self.screen,
+                (150, 150, 150),
+                (x, zero_y),
+                (x + w, zero_y),
+                1
+            )
+
+    def _draw_time_grid(self,x, y, w, h,history_len,show_label=True,fixed_interval=2.0):
+
+        if history_len < 2:
+            return
+
+        # ===== เลือก mode จาก class state =====
+        mode = self.mode_plot
+        if mode == "fixed":
+            interval = fixed_interval
+
+        else:  # AUTO MODE
+            total_time = history_len * self.dt
+
+            if total_time <= 10:
+                interval = 1.0
+            elif total_time <= 30:
+                interval = 2.0
+            elif total_time <= 60:
+                interval = 5.0
+            else:
+                interval = 10.0
+
+        steps_per_mark = max(1, int(interval / self.dt))
+
+        for i in range(history_len):
+
+            x_pos = x + i
+
+            # ===== Major grid =====
+            if i % steps_per_mark == 0:
+
+                pygame.draw.line(
+                    self.screen,
+                    (205, 205, 205),
+                    (x_pos, y),
+                    (x_pos, y + h),
+                    1
+                )
+
+                if show_label:
+                    time_sec = i * self.dt
+
+                    label = self.font_small.render(
+                        f"{time_sec:.0f}s",
+                        True,
+                        (110, 110, 110)
+                    )
+
+                    text_rect = label.get_rect()
+                    text_rect.center = (x_pos, y + h + 18)
+                    self.screen.blit(label, text_rect)
+
+            # ===== Minor grid =====
+            else:
+                pygame.draw.line(
+                    self.screen,
+                    (245, 245, 245),
+                    (x_pos, y),
+                    (x_pos, y + h),
+                    1
+                )
 
     def close(self):
         if self.screen is not None:
@@ -698,7 +705,71 @@ class RCTankEnv(gym.Env):
 
         save_path = Path(self.save_dir)
         save_path.mkdir(parents=True, exist_ok=True)
-
-        filename = save_path / f"episode_{self.episode_count + 1:05d}.png"
+        self.episode_count += 1
+        filename = save_path / f"episode_{self.episode_count:05d}.png"
         pygame.image.save(self.screen, str(filename))
+        self._save_metadata_yaml(image_filename=filename)
 
+    def _save_metadata_yaml(self, image_filename: str):
+
+        meta_dir = Path(self.save_dir) / "meta_data"
+        meta_dir.mkdir(parents=True, exist_ok=True)
+
+        last_error = abs(self.setpoint - self.level)
+
+        metadata = {
+            "episode_info": {
+                "episode_id": int(self.episode_count),
+                "image_file": str(image_filename),
+            },
+            "environment_config": {
+                "R": float(self.R),
+                "C": float(self.C),
+                "tau": float(self.R * self.C),
+                "dt": float(self.dt),
+                "control_mode": str(self.mode),
+                "level_max": float(self.level_max),
+                "max_action_volt": float(self.max_volt),
+                "max_action_current": float(self.max_current),
+                "reward_type": str(self.reward_type),
+                "use_pid_state": bool(self.use_pid_state),
+            },
+            "results": {
+                "setpoint": float(self.setpoint),
+                "final_level": float(self.level),
+                "last_error": float(last_error),
+                "cumulative_reward": float(np.sum(self.reward_history)),
+                "duration_sec": float(self.time),
+            }
+        }
+
+        meta_path = meta_dir / f"episode_{self.episode_count:05d}.yaml"
+
+        with open(meta_path, "w", encoding="utf-8") as f:
+            yaml.dump(metadata, f, sort_keys=False, allow_unicode=True)
+
+    def _init_episode_counter_from_folder(self):
+        save_path = Path(self.save_dir)
+
+        if not save_path.exists():
+            self.episode_count = 0
+            return
+
+        existing_files = list(save_path.glob("episode_*.png"))
+
+        if not existing_files:
+            self.episode_count = 0
+            return
+
+        # Extract episode numbers
+        episode_numbers = []
+        for f in existing_files:
+            try:
+                number = int(f.stem.split("_")[1])
+                episode_numbers.append(number)
+            except:
+                continue
+
+        self.episode_count = max(episode_numbers) if episode_numbers else 0
+
+    
