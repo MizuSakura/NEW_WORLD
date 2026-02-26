@@ -171,7 +171,7 @@ if __name__ == "__main__":
     FILE_NAME_LOGGER = "episode_"
 
     # training config
-    EPISODES = 1000
+    EPISODES = 10000
     MAX_STEPS = 200
     BATCH_SIZE = 1080
     LOGGIN_STATUS_EP = True
@@ -200,7 +200,7 @@ if __name__ == "__main__":
     CHECKPOINT_PATH = Path(
         r"D:\Project_end\New_world\my_project\models\checkpoint\Autosave.pt"
     )
-    AUTO_SAVE_EVERY = 10
+    AUTO_SAVE_EVERY = 1
     FINAL_MODEL_PATH =  r"D:\Project_end\New_world\my_project\models\Test_histrory.pt"
 
     # logger
