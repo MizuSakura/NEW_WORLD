@@ -26,3 +26,5 @@ experiments/config/predict_model/
 *.pt
 *zip
 *.parquet
+notebooks/analysis/
+logs/
