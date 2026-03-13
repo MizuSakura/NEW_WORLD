@@ -23,3 +23,9 @@ pymodbus
 schemdraw
 requests
 flask requests
+paho-mqtt>=1.6.1
+aiohttp>=3.9.0
+fastapi>=0.110.0
+uvicorn>=0.27.0
+pydantic>=2.0.0
+PyYAML>=6.0
