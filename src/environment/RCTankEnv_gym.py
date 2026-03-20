@@ -10,6 +10,7 @@ import yaml
 
 from src.environment.noise_manager import NoiseManager
 from src.environment.reward_function_control import Reward_manager
+from src.environment.state_builder import StateBuilder
 
 class RCTankEnv(gym.Env):
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 30}
@@ -42,48 +43,27 @@ class RCTankEnv(gym.Env):
         self.max_current = max_action_current
         self.render_mode = render_mode
 
-        #PID STATE
-        self.use_pid_state = use_pid_state
-        self.prev_error = 0.0
-        self.integral_error = 0.0
-
-        # ===== Noise =====
         self.noise = noise_manager
+        self.use_pid_state = use_pid_state
 
-        # ===== History length =====
-        self.level_history_len = 3
-        self.setpoint_history_len = 3
-        self.action_history_len = 3
+        # ===== StateBuilder =====
+        _rl_cfg_path = Path(__file__).resolve().parents[2] / "src" / "API" / "config" / "rl_params.yaml"
+        if _rl_cfg_path.exists():
+            self.state_builder = StateBuilder.from_yaml(_rl_cfg_path)
+        else:
+            self.state_builder = StateBuilder({})   # default
 
-        # ===== Deques =====
-        self.prev_levels = deque(maxlen=self.level_history_len)
-        self.prev_actions = deque(maxlen=self.action_history_len)
-        self.prev_setpoints = deque(maxlen=self.setpoint_history_len)
+        # backward compat
+        self.level_history_len    = self.state_builder.level_hist_len
+        self.action_history_len   = self.state_builder.action_hist_len
+        self.setpoint_history_len = self.state_builder.setpoint_hist_len
+        self.prev_error           = 0.0
+        self.integral_error       = 0.0
 
         # ===== Observation Space =====
+
         action_high = self.max_volt if self.mode == "voltage" else self.max_current
-
-        base_low = (
-        [0.0] * self.level_history_len
-        + [0.0] * self.action_history_len
-        + [0.0] * self.setpoint_history_len)
-
-        base_high = (
-            [self.level_max] * self.level_history_len
-            + [action_high] * self.action_history_len
-            + [self.level_max] * self.setpoint_history_len
-            )
-
-        # ---- PID bounds ----
-        if self.use_pid_state:
-            pid_low = [-self.level_max, -self.level_max, -self.level_max]
-            pid_high = [self.level_max, self.level_max, self.level_max]
-        else:
-            pid_low = []
-            pid_high = []
-
-        obs_low = np.array(base_low + pid_low, dtype=np.float32)
-        obs_high = np.array(base_high + pid_high, dtype=np.float32)
+        obs_low, obs_high = self.state_builder.obs_bounds(action_max=action_high)
 
         self.observation_space = spaces.Box(
             low=obs_low,
@@ -157,31 +137,21 @@ class RCTankEnv(gym.Env):
         if self.noise is not None:
             self.noise.reset()
 
-        self.prev_levels.clear()
-        self.prev_actions.clear()
-        self.prev_setpoints.clear()
-
-        for _ in range(self.level_history_len):
-            self.prev_levels.append(self.level)
-
-        for _ in range(self.action_history_len):
-            self.prev_actions.append(0.0)
-
-        for _ in range(self.setpoint_history_len):
-            self.prev_setpoints.append(self.setpoint)
-
-        self.level_history = [self.level]
+        self.level_history  = [self.level]
         self.action_history = []
         self.reward_history = []
 
-        base_obs = list(self.prev_levels) + list(self.prev_actions) + list(self.prev_setpoints)
-
-        if self.use_pid_state:
-            pid_obs = [0.0, 0.0, 0.0]
-        else:
-            pid_obs = []
-
-        obs = np.array(base_obs + pid_obs, dtype=np.float32)
+        self.state_builder.reset(
+            level    = self.level,
+            action   = 0.0,
+            setpoint = self.setpoint,
+            dt       = self.dt,
+        )
+        obs = self.state_builder.update(
+            level    = self.level,
+            action   = 0.0,
+            setpoint = self.setpoint,
+        )
 
         init_action = 0.0
         self.reward_manager.reset(
@@ -259,18 +229,11 @@ class RCTankEnv(gym.Env):
         if self.noise is not None:
             observed_level = self.noise.apply_sensor_noise(observed_level)
 
-        self.prev_levels.append(observed_level)
-        self.prev_actions.append(action_val)
-        self.prev_setpoints.append(self.setpoint)
-
-        base_obs = list(self.prev_levels) + list(self.prev_actions) + list(self.prev_setpoints)
-
-        if self.use_pid_state:
-            pid_obs = [error, self.integral_error, derivative]
-        else:
-            pid_obs = []
-
-        obs = np.array(base_obs + pid_obs, dtype=np.float32)
+        obs = self.state_builder.update(
+            level    = observed_level,
+            action   = action_val,
+            setpoint = self.setpoint,
+        )
 
         # -------- Reward --------
         error = abs(self.setpoint - self.level)
