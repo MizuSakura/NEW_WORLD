@@ -1,79 +1,93 @@
-from src.utils.comucation_modbusTCP import ModbusTCP
-from src.environment.reward_function_control import Reward_manager
+# D:\Project_end\New_world\my_project\src\environment\Apply_real_env.py
+# Checkpoint 11 — ใช้ StateBuilder แทน hardcode deque
+
+from pathlib import Path
 
 import numpy as np
 import time
-from collections import deque
+
+from src.utils.comucation_modbusTCP import ModbusTCP
+from src.environment.reward_function_control import Reward_manager
+from src.environment.state_builder import StateBuilder
 
 
 class Real_env_remote:
     """
     Real Remote Environment with ModbusTCP
-    Canonical-state version for Sim-to-Real RL
+    StateBuilder version — state structure identical to RCTankEnv_gym
 
-    State format (IDENTICAL to RCTankEnv):
-    [ level,
-      prev_action_1, ..., prev_action_10,
-      setpoint ]
+    State format ถูกกำหนดจาก rl_params.yaml section 'state' ผ่าน StateBuilder
+    ดังนั้น state_dim จะ match กับ gym env โดยอัตโนมัติ
+
+    ตัวอย่าง (default yaml):
+        [level×3, action×3, setpoint×3, integral, derivative]  → dim=11
     """
 
     def __init__(
         self,
-        ip_host="192.168.1.100",
-        port=502,
-        min_action=0.0,
-        max_action=10.0,
-        setpoint=5.0,
-        delay_of_action=0.2,
-        address_sensor=None,
-        address_actuator=None,
-        action_history_len=10,
+        ip_host: str = "192.168.1.100",
+        port: int = 502,
+        min_action: float = 0.0,
+        max_action: float = 10.0,
+        setpoint: float = 5.0,
+        delay_of_action: float = 0.2,
+        address_sensor: int = None,
+        address_actuator: int = None,
+        config_path: Path = None,
     ):
-        # ==================================================
+        # --------------------------------------------------
+        # StateBuilder — อ่านจาก rl_params.yaml
+        # --------------------------------------------------
+        if config_path is None:
+            config_path = Path("src/API/config/rl_params.yaml")
+
+        self.state_builder = StateBuilder.from_yaml(config_path)
+        print(f"[Real_env_remote] {self.state_builder}")
+
+        # --------------------------------------------------
         # Communication
-        # ==================================================
+        # --------------------------------------------------
         self.ip_host = ip_host
         self.modbus = ModbusTCP(host=self.ip_host, port=port)
         self.modbus.connect()
 
-        # ==================================================
+        # --------------------------------------------------
         # Reward Manager (SAME as sim)
-        # ==================================================
+        # --------------------------------------------------
         self.reward_manager = Reward_manager(buffer_size=5)
 
-        # ==================================================
+        # --------------------------------------------------
         # Remote IO scaling
-        # ==================================================
+        # --------------------------------------------------
         self.max_value_remote_IO = 27647
         self.min_value_remote_IO = 0
         self.address_sensor = address_sensor
         self.address_actuator = address_actuator
 
-        # ==================================================
-        # Action space (IDENTICAL semantics to sim)
-        # ==================================================
+        # --------------------------------------------------
+        # Action space
+        # --------------------------------------------------
         self.min_action = min_action
         self.max_action = max_action
+        self.action_dim = 1
 
-        # ==================================================
-        # Canonical State
-        # ==================================================
-        self.action_history_len = action_history_len
-        self.prev_actions = deque(maxlen=self.action_history_len)
-
-        self.state_dim = 1 + self.action_history_len + 1
-        # level + action_history + setpoint
-
-        # ==================================================
+        # --------------------------------------------------
         # Internal
-        # ==================================================
+        # --------------------------------------------------
         self.setpoint = setpoint
         self.delay = delay_of_action
 
-    # ==================================================
+    # -------------------------------------------------------
+    # Properties — ให้ train_SAC_real_agent เรียกได้เหมือนเดิม
+    # -------------------------------------------------------
+    @property
+    def state_dim(self) -> int:
+        return self.state_builder.state_dim
+
+    # ======================================================
     # IO FUNCTIONS
-    # ==================================================
-    def read_sensor(self, address=None):
+    # ======================================================
+    def read_sensor(self, address: int = None) -> float:
         if address is None:
             raise ValueError("Sensor register address is missing")
 
@@ -85,7 +99,7 @@ class Real_env_remote:
         )
         return float(value)
 
-    def write_actuator(self, address=None, action=None):
+    def write_actuator(self, address: int = None, action: float = None):
         if address is None:
             raise ValueError("Actuator register address is missing")
 
@@ -99,64 +113,61 @@ class Real_env_remote:
         self.modbus.write_holding_register(address=address, value=raw)
         return action
 
-    # ==================================================
+    # ======================================================
     # RESET
-    # ==================================================
+    # ======================================================
     def reset(self):
-        # observed state from real sensor
+        # อ่าน level จริงจาก sensor
         level = self.read_sensor(self.address_sensor)
 
-        # randomize setpoint (same philosophy as sim)
-        self.setpoint = np.random.uniform(self.min_action, self.max_action)
+        # สุ่ม setpoint (same philosophy as sim)
+        self.setpoint = float(np.random.uniform(self.min_action, self.max_action))
 
-        # initialize action history
-        self.prev_actions.clear()
+        # reset StateBuilder → init ด้วย level จริง, action=0, setpoint ที่สุ่มได้
         init_action = np.clip(level, self.min_action, self.max_action)
+        self.state_builder.reset(
+            level=level,
+            action=init_action,
+            setpoint=self.setpoint,
+            dt=self.delay,
+        )
 
-        for _ in range(self.action_history_len):
-            self.prev_actions.append(init_action)
-
-        # reset reward manager (TRUE observed state)
+        # reset reward manager
         self.reward_manager.reset(
             init_setpoint=self.setpoint,
             init_state=level,
             init_action=init_action,
         )
 
-        state = np.array(
-            [level] + list(self.prev_actions) + [self.setpoint],
-            dtype=np.float32,
-        )
+        # state จาก StateBuilder (ไม่ต้อง update — reset คืนค่า state เริ่มต้น)
+        state = self.state_builder.get_state()
 
-        info = {"setpoint": self.setpoint}
+        info = {"setpoint": self.setpoint, "level": level}
         return state, info
 
-    # ==================================================
+    # ======================================================
     # STEP
-    # ==================================================
+    # ======================================================
     def step(self, action):
         action = float(np.clip(action, self.min_action, self.max_action))
 
-        # write action to actuator
+        # ส่ง action ไปยัง actuator จริง
         self.write_actuator(self.address_actuator, action)
 
-        # physical / communication delay
+        # รอ physical / communication delay
         time.sleep(self.delay)
 
-        # read observed level from sensor
+        # อ่าน level จาก sensor จริง
         level = self.read_sensor(self.address_sensor)
 
-        # update action history (KEY for canonical state)
-        self.prev_actions.append(action)
-
-        # build canonical state
-        state = np.array(
-            [level] + list(self.prev_actions) + [self.setpoint],
-            dtype=np.float32,
+        # update StateBuilder → คำนวณ history, integral, derivative ทั้งหมด
+        state = self.state_builder.update(
+            level=level,
+            action=action,
+            setpoint=self.setpoint,
         )
 
         # reward (same semantics as sim)
-        error = abs(self.setpoint - level)
         self.reward_manager.update(
             setpoint=self.setpoint,
             state=level,
@@ -165,11 +176,13 @@ class Real_env_remote:
         reward = self.reward_manager.reward_continuous_control()
 
         # termination (soft & safe for real system)
+        error = abs(self.setpoint - level)
         done = error < 0.1
 
         info = {
             "error": error,
             "raw_level": level,
+            "setpoint": self.setpoint,
         }
 
         return state, reward, done, info
