@@ -1,12 +1,18 @@
 import time
 import json
 import paho.mqtt.client as mqtt
+import yaml
+from pathlib import Path
 
-BROKER = "100.85.77.73"
-PORT = 1883
-USER, PASS = "yessuskhonpui", "246810"
-TOPIC = "RL/COMMAND_CONTROL/ACTION"
-CLIENT_ID = "python-subscriber-01"
+_cfg = yaml.safe_load(
+    (Path(__file__).resolve().parents[3] / "config/hardware.yaml").read_text()
+)
+BROKER    = _cfg["mqtt"]["broker"]
+PORT      = _cfg["mqtt"]["port"]
+CLIENT_ID = _cfg["mqtt"]["client_id"]
+TOPIC     = _cfg["mqtt"]["topics"]["action"]
+USER      = _cfg["mqtt"]["username"]   
+PASS      = _cfg["mqtt"]["password"]   
 
 # ======================================================
 # SYSTEM STATE
