@@ -428,16 +428,24 @@ class TRAIN_MODEL_PT:
 # 🔹 MAIN
 # ============================================================== 
 if __name__ == "__main__":
-    FILE_NAME = "test2_dataset_package.zip"
-    FILE_MODEL = "lstm_model_2_s.pth"
-    SAVE_ENGINE = "pandas"
+    import yaml
 
     ROOT = Path(__file__).resolve().parents[2]
-    ZIP_PATH = ROOT / "data" / "processed" / FILE_NAME
-    TEMP_DIR = ROOT / "data" / "temp_extracted"
-    MODEL_PATH = ROOT / "models" / FILE_MODEL
-    RESULT_DIR = ROOT / "models" / "results"
-    BACKUP_FOLDER = MODEL_PATH.parent / "backup"  # folder แยกสำหรับ backup
+    RL_CONFIG_PATH = ROOT / "src" / "API" / "config" / "rl_params.yaml"
+
+    if RL_CONFIG_PATH.exists():
+        with open(RL_CONFIG_PATH, "r", encoding="utf-8") as f:
+            rl_cfg = yaml.safe_load(f)
+    else:
+        rl_cfg = {}
+
+    cfg = rl_cfg.get("lstm_pt", {})
+
+    ZIP_PATH      = ROOT / cfg.get("dataset_zip",      "data/processed/test2_dataset_package.zip")
+    MODEL_PATH    = ROOT / cfg.get("model_save_path",  "models/lstm_model_2_s.pth")
+    TEMP_DIR      = ROOT / "data" / "temp_extracted"
+    RESULT_DIR    = ROOT / "models" / "results"
+    BACKUP_FOLDER = MODEL_PATH.parent / "backup"
 
     MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
     BACKUP_FOLDER.mkdir(parents=True, exist_ok=True)
@@ -447,38 +455,36 @@ if __name__ == "__main__":
         data_dir = unpack_dataset_zip(ZIP_PATH, TEMP_DIR)
 
         trainer = TRAIN_MODEL_PT(
-            data_folder=data_dir,
-            model_save_path=MODEL_PATH,
-            result_folder=RESULT_DIR,
-            dataset_zip_path=ZIP_PATH,
-            dataset_type="lazy",
-            model_type="DeepLSTM",
-            batch_size=512,
-            hidden_dim=256,
-            num_layers=4,
-            lr=1e-4,
-            num_epochs=1000,
-            patience=20,
-            save_engine=SAVE_ENGINE,
-            num_worker=1,
+            data_folder     = data_dir,
+            model_save_path = MODEL_PATH,
+            result_folder   = RESULT_DIR,
+            dataset_zip_path = ZIP_PATH,
+            backup_folder   = BACKUP_FOLDER,
+            dataset_type    = cfg.get("dataset_type", "lazy"),
+            model_type      = cfg.get("model_type",   "DeepLSTM"),
+            batch_size      = cfg.get("batch_size",   512),
+            hidden_dim      = cfg.get("hidden_dim",   256),
+            num_layers      = cfg.get("num_layers",   4),
+            lr              = cfg.get("lr",           1e-4),
+            num_epochs      = cfg.get("num_epochs",   1000),
+            patience        = cfg.get("patience",     20),
+            num_worker      = cfg.get("num_worker",   1),
+            save_engine     = cfg.get("save_engine",  "pandas"),
         )
 
         trainer.prepare_data()
         trainer.split_dataset(continuous_test=True)
         trainer.build_model()
 
-        # backup checkpoint ใน folder แยก
         backup_path = BACKUP_FOLDER / "model_backup.pth"
-
-        # Resume จาก backup ถ้ามี
         if backup_path.exists():
-            print("[INFO] Resuming training from backup...")
+            print("[INFO] Resuming from backup...")
             trainer.train(backup_interval=1, resume_from=backup_path)
         else:
-            trainer.train(backup_interval=1, resume_from=None)
+            trainer.train(backup_interval=1)
 
         trainer.evaluate_test_continuous(num_plot=500)
 
     finally:
         shutil.rmtree(TEMP_DIR, ignore_errors=True)
-        print(f"[CLEAN] Temporary folder removed: {TEMP_DIR}")
+        print(f"[CLEAN] Temp folder removed: {TEMP_DIR}")
