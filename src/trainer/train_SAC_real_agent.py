@@ -151,107 +151,151 @@ def train_Agent(
     print("\n[Trainer] Training finished.")
 
 if __name__ == "__main__":
+    import yaml
 
-    # ==============================
-    # REAL ENV CONFIG
-    # ==============================
-    IP_HOST = "192.168.1.100"
-    PORT = 502
-    MIN_ACTION = 0
-    MAX_ACTION = 10
-    SETPOINT = 5
-    DELAY_OF_ACTION = 0.2
-    ADDRESS_SENSOR = 1
-    ADDRESS_ACTUATOR = 1025
+    PROJECT_ROOT   = Path(__file__).resolve().parents[2]
+    RL_CONFIG_PATH = PROJECT_ROOT / "src" / "API" / "config" / "rl_params.yaml"
 
-    # CONFIG AGENT 
-    LEARNING_RATE = 3e-4
-    GAMMA = 0.99
-    TAU = 0.005
-    ALPHA = 0.4
-    LOGGER_STATUS = True
+    if RL_CONFIG_PATH.exists():
+        with open(RL_CONFIG_PATH, "r", encoding="utf-8") as f:
+            rl_cfg = yaml.safe_load(f)
+    else:
+        rl_cfg = {}
 
-    SIMPLE_LAYERS_ACTOR = 2
-    SIMPLE_HIDDEN_ACTOR = 256
+    # ── แยก section ──────────────────────────────────────────
+    train_cfg  = rl_cfg.get("training",  {})
+    sac_cfg    = rl_cfg.get("sac",       {})
+    logger_cfg = rl_cfg.get("logger",    {})
+    real_cfg   = rl_cfg.get("real_env",  {})
+
+    actor_cfg  = sac_cfg.get("actor",  {})
+    critic_cfg = sac_cfg.get("critic", {})
+
+    # ── Real Env parameters ───────────────────────────────────
+    IP_HOST          = real_cfg.get("ip_host",          "192.168.1.100")
+    PORT             = real_cfg.get("port",             502)
+    MIN_ACTION       = real_cfg.get("min_action",       0)
+    MAX_ACTION       = real_cfg.get("max_action",       10)
+    SETPOINT         = real_cfg.get("setpoint",         5)
+    DELAY_OF_ACTION  = real_cfg.get("delay_of_action",  0.2)
+    ADDRESS_SENSOR   = real_cfg.get("address_sensor",   1)
+    ADDRESS_ACTUATOR = real_cfg.get("address_actuator", 1025)
+    DELAY_TIME_RESET = real_cfg.get("delay_time_reset", 1.0)
+
+    # ── Training parameters ───────────────────────────────────
+    EPISODES        = train_cfg.get("episodes",        1000)
+    MAX_STEPS       = train_cfg.get("max_steps",       100)
+    BATCH_SIZE      = train_cfg.get("batch_size",      1080)
+    AUTO_SAVE_EVERY = train_cfg.get("auto_save_every", 5)
+
+    def _resolve_path(name: str, default_dir: str) -> Path:
+        p = Path(name)
+        if p.suffix == "":
+            p = p.with_suffix(".pt")
+        if p.is_absolute():
+            return p
+        if len(p.parts) == 1:
+            return PROJECT_ROOT / default_dir / p
+        return PROJECT_ROOT / p
+
+    CHECKPOINT_PATH  = _resolve_path(
+        train_cfg.get("checkpoint_path", "sac_checkpoint_real"),
+        "models/checkpoint"
+    )
+    FINAL_MODEL_PATH = str(_resolve_path(
+        train_cfg.get("final_model_path", "Test_train_real"),
+        "models"
+    ))
+
+    # ── SAC parameters ────────────────────────────────────────
+    LEARNING_RATE = sac_cfg.get("learning_rate", 3e-4)
+    GAMMA         = sac_cfg.get("gamma",         0.99)
+    TAU           = sac_cfg.get("tau",           0.005)
+    ALPHA         = sac_cfg.get("alpha",         0.4)
+
+    SIMPLE_LAYERS_ACTOR       = actor_cfg.get("layers",  2)
+    SIMPLE_HIDDEN_ACTOR       = actor_cfg.get("hidden",  256)
     ADVANCED_HIDDEN_SIZE_ACTOR = None
 
-    SIMPLE_LAYERS_CRITIC = 2
-    SIMPLE_HIDDEN_CRITIC = 256
+    SIMPLE_LAYERS_CRITIC        = critic_cfg.get("layers",  2)
+    SIMPLE_HIDDEN_CRITIC        = critic_cfg.get("hidden",  256)
     ADVANCED_HIDDEN_SIZE_CRITIC = None
-    CRITIC_ENCODE = False
-    LOGGER_PATH_AGENT = r"D:\Project_end\New_world\my_project\logs\agent\RC_Tank"
-    LOGGER_FILE_NAME_AGENT = "optimized_"
+    CRITIC_ENCODE               = critic_cfg.get("encoder", False)
 
-    # ==============================
-    # TRAINING CONFIG
-    # ==============================
+    # ── Logger ────────────────────────────────────────────────
+    LOGGER_PATH_AGENT      = logger_cfg.get("agent_folder",
+                                 str(PROJECT_ROOT / "logs" / "agent" / "RC_Tank"))
+    LOGGER_FILE_NAME_AGENT = logger_cfg.get("agent_filename", "optimized_")
 
-    EPISODES = 1000
-    MAX_STEPS = 100
-    BATCH_SIZE = 1080
-    AUTO_SAVE_EVERY = 5
-    DELAY_TIME_RESET = 1.0
+    EPISODE_LOG_FOLDER = real_cfg.get("episode_log_folder",
+                             str(PROJECT_ROOT / "logs" / "episode_train_real"))
 
-    CHECKPOINT_PATH = Path(
-        r"D:\Project_end\New_world\my_project\models\checkpoint\sac_checkpoint_real.pt"
-    )
-    FINAL_MODEL_PATH = (
-        r"D:\Project_end\New_world\my_project\models\Test_train_real.pt"
-    )
+    # ── Print config summary ──────────────────────────────────
+    print("\n" + "="*50)
+    print("[Config] Real Training Parameters")
+    print("="*50)
+    print(f"  Modbus Host      : {IP_HOST}:{PORT}")
+    print(f"  Setpoint         : {SETPOINT}")
+    print(f"  Action range     : [{MIN_ACTION}, {MAX_ACTION}]")
+    print(f"  Episodes         : {EPISODES}")
+    print(f"  Max Steps        : {MAX_STEPS}")
+    print(f"  Batch Size       : {BATCH_SIZE}")
+    print(f"  Learning Rate    : {LEARNING_RATE}")
+    print(f"  Alpha            : {ALPHA}")
+    print(f"  Checkpoint       : {CHECKPOINT_PATH}")
+    print("="*50 + "\n")
 
-     # ==============================
-    # LOGGER
-    # ==============================
+    # ── Logger ────────────────────────────────────────────────
     logger = EpisodeLogger(
-        folder=r"D:\Project_end\New_world\my_project\logs\episode_train_real",
-        filename="episode_",
+        folder   = EPISODE_LOG_FOLDER,
+        filename = "episode_",
     )
 
-    # ==============================
-    # ENVIRONMENT
-    # ==============================
-    env, state_dim, action_dim, min_action, max_action  = env_setup_real(ip_host=IP_HOST, port=PORT, min_action=MIN_ACTION,
-        max_action=MAX_ACTION, setpoint=SETPOINT, delay_of_action=DELAY_OF_ACTION, address_sensor=ADDRESS_SENSOR,
-        address_actuator=ADDRESS_ACTUATOR,
+    # ── Environment ───────────────────────────────────────────
+    env, state_dim, action_dim, min_action, max_action = env_setup_real(
+        ip_host          = IP_HOST,
+        port             = PORT,
+        min_action       = MIN_ACTION,
+        max_action       = MAX_ACTION,
+        setpoint         = SETPOINT,
+        delay_of_action  = DELAY_OF_ACTION,
+        address_sensor   = ADDRESS_SENSOR,
+        address_actuator = ADDRESS_ACTUATOR,
     )
 
-    # ==============================
-    # AGENT
-    # ==============================
+    # ── Agent ─────────────────────────────────────────────────
     agent = SACAgent(
-        state_dim=state_dim,
-        action_dim=action_dim,
-        min_action=np.array([min_action]),
-        max_action=np.array([max_action]),
-        lr=LEARNING_RATE,
-        gamma=GAMMA,
-        tau=TAU,
-        alpha=ALPHA,
-        logger_status=LOGGER_STATUS,
-        simple_layers_actor=SIMPLE_LAYERS_ACTOR,
-        simple_hidden_actor=SIMPLE_HIDDEN_ACTOR,
-        advanced_hidden_size_actor=ADVANCED_HIDDEN_SIZE_ACTOR,
-        simple_layers_critic=SIMPLE_LAYERS_CRITIC,
-        simple_hidden_critic=SIMPLE_HIDDEN_CRITIC,
-        advanced_hidden_sizes_critic=ADVANCED_HIDDEN_SIZE_CRITIC,
-        critic_encoder=CRITIC_ENCODE,
-        logger_path=LOGGER_PATH_AGENT,
-        file_name_log=LOGGER_FILE_NAME_AGENT
+        state_dim    = state_dim,
+        action_dim   = action_dim,
+        min_action   = np.array([min_action]),
+        max_action   = np.array([max_action]),
+        lr           = LEARNING_RATE,
+        gamma        = GAMMA,
+        tau          = TAU,
+        alpha        = ALPHA,
+        logger_status = True,
+        simple_layers_actor        = SIMPLE_LAYERS_ACTOR,
+        simple_hidden_actor        = SIMPLE_HIDDEN_ACTOR,
+        advanced_hidden_size_actor = ADVANCED_HIDDEN_SIZE_ACTOR,
+        simple_layers_critic         = SIMPLE_LAYERS_CRITIC,
+        simple_hidden_critic         = SIMPLE_HIDDEN_CRITIC,
+        advanced_hidden_sizes_critic = ADVANCED_HIDDEN_SIZE_CRITIC,
+        critic_encoder = CRITIC_ENCODE,
+        logger_path    = LOGGER_PATH_AGENT,
+        file_name_log  = LOGGER_FILE_NAME_AGENT,
     )
 
-    # ==============================
-    # TRAIN
-    # ==============================
+    # ── Train ─────────────────────────────────────────────────
     train_Agent(
-        env=env,
-        agent=agent,
-        logger=logger,
-        EPISODES=EPISODES,
-        MAX_STEPS=MAX_STEPS,
-        BATCH_SIZE=BATCH_SIZE,
-        CHECKPOINT_PATH=CHECKPOINT_PATH,
-        AUTO_SAVE_EVERY=AUTO_SAVE_EVERY,
-        DELAY_TIME_RESET=DELAY_TIME_RESET,
-        LOGGIN_STATUS_EP=True,
-        FINAL_MODEL_PATH=FINAL_MODEL_PATH,
+        env              = env,
+        agent            = agent,
+        logger           = logger,
+        EPISODES         = EPISODES,
+        MAX_STEPS        = MAX_STEPS,
+        BATCH_SIZE       = BATCH_SIZE,
+        CHECKPOINT_PATH  = CHECKPOINT_PATH,
+        AUTO_SAVE_EVERY  = AUTO_SAVE_EVERY,
+        DELAY_TIME_RESET = DELAY_TIME_RESET,
+        LOGGIN_STATUS_EP = True,
+        FINAL_MODEL_PATH = FINAL_MODEL_PATH,
     )
