@@ -84,6 +84,9 @@ class MetricLogger(BaseLoggerPlugin):
     def log(self, key, value):
         self.buffer["timestamp"].append(time.time())
         self.buffer["key"].append(str(key))
+        import torch
+        if isinstance(value, torch.Tensor):
+            value = value.detach().cpu()
         self.buffer["value"].append(float(value))
 
     def _make_path(self):
