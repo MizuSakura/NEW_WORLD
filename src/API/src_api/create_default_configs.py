@@ -67,46 +67,103 @@ if __name__ == "__main__":
     # -------------------------------------------------
     # Default Config (Front-end can modify here)
     # -------------------------------------------------
-
     NETWORK_CONFIG = {
 
-        "device": {
-            "id": "jetson_nvidia01",
-            "location": "lab_rc_system"
-        },
+            "device": {
+                "id": "jetson_nvidia01",
+                "location": "lab_rc_system"
+            },
 
-        "mqtt": {
-            "broker": "192.168.1.10",
-            "port": 1883,
-            "keepalive": 60,
+            "mqtt": {
+                "broker": "192.168.1.10",
+                "port": 1883,
+                "keepalive": 60,
+                "client_id": "jetson_nvidia01",
+                "username": "",
+                "password": "",
+                "qos": 1,
+                "topics": {
+                    "control":   "project/rl/nvidia01/control",
+                    "state":     "project/rl/nvidia01/state",
+                    "telemetry": "project/rl/nvidia01/telemetry",
+                    "emergency": "project/rl/nvidia01/emergency",
+                    "hardware":  "project/rl/nvidia01/hardware",
+                    "mode":      "project/rl/nvidia01/mode"
+                },
+                "emergency_qos": 2
+            },
 
-            "client_id": "jetson_nvidia01",
-            "username": "",
-            "password": "",
+            "http": {
+                "enable": True,
+                "host": "0.0.0.0",
+                "port": 8000
+            },
 
-            "qos": 1,
+            "system": {
+                "mode": "RL",
+                "allow_manual_override": True,
+                "heartbeat_interval": 2,
+                "emergency_stop": False
+            },
 
-            "topics": {
-                "control": "project/rl/nvidia01/control",
-                "state": "project/rl/nvidia01/state",
-                "telemetry": "project/rl/nvidia01/telemetry",
-                "emergency": "project/rl/nvidia01/emergency"
+            "server": {
+                "host": "127.0.0.1",
+                "port": 8000,
+                "upload_model": True,
+                "upload_log": True
+            },
+
+            "training": {
+                "mode": "offline",
+                "algorithm": "SAC",
+                "episodes": 10000,
+                "max_steps": 200,
+                "batch_size": 1080,
+                "auto_save_every": 1,
+                "checkpoint_path": "models/checkpoint/Autosave.pt",
+                "final_model_path": "models/Test_history.pt"
+            },
+
+            "sac": {
+                "learning_rate": 0.0003,
+                "gamma": 0.99,
+                "tau": 0.005,
+                "alpha": 0.4,
+                "actor": {
+                    "layers": 2,
+                    "hidden": 256
+                },
+                "critic": {
+                    "layers": 2,
+                    "hidden": 256,
+                    "encoder": False
+                }
+            },
+
+            "noise": {
+                "enabled": True,
+                "ou_noise": {
+                    "mu": 0.0,
+                    "theta": 0.15,
+                    "sigma": 0.25,
+                    "dt": 0.1
+                },
+                "gaussian": {
+                    "sigma": 0.02
+                },
+                "scheduler": {
+                    "peak": 3000,
+                    "std": 1500,
+                    "max_scale": 1.0
+                }
+            },
+
+            "hardware": {
+                "modbus_host": "192.168.1.20",
+                "modbus_port": 502
             }
-        },
 
-        "http": {
-            "enable": True,
-            "host": "0.0.0.0",
-            "port": 8000
-        },
-
-        "system": {
-            "mode": "RL",
-            "allow_manual_override": True,
-            "heartbeat_interval": 2
         }
-
-    }
 
     # -------------------------------------------------
     # Config directory
