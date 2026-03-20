@@ -13,6 +13,8 @@ import matplotlib.pyplot as plt
 import os
 import time
 from tqdm import tqdm
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning, module="sklearn")
 
 # ⚡ Enable cuDNN benchmark for fixed-size LSTM input (GPU speedup)
 torch.backends.cudnn.benchmark = True
@@ -263,20 +265,75 @@ class TRAIN_MODEL:
         plt.legend()
         plt.show()
 
+def _get_or_create_scaler(project_root: Path, cfg: dict) -> Path:
+    from src.utils.scale_referance import GlobalScalingReference
+
+    config_dir = project_root / "config"
+    data_dir   = project_root / cfg.get("data_folder", "data/raw")
+
+    input_col  = cfg.get("input_col",  "DATA_INPUT")
+    output_col = cfg.get("output_col", "DATA_OUTPUT")
+
+    # ชื่อ zip ตาม input/output col
+    zip_name   = f"AutoScaler_{input_col}_{output_col}_scalers.zip"
+    zip_path   = config_dir / zip_name
+
+    if zip_path.exists():
+        print(f"[Scaler] Found existing scaler: {zip_path.name}")
+        return zip_path
+
+    print("[Scaler] Creating scaler from data/raw...")
+
+    scaler_ref = GlobalScalingReference(
+        user_create     = "auto",
+        name_project    = "RC_Tank_RL",
+        data_dir        = data_dir,
+        save_dir        = config_dir,
+        dataset_name    = f"AutoScaler_{input_col}_{output_col}",
+        input_features  = [input_col],     # ← แค่ 1 column
+        output_features = [output_col],
+        scaler_type     = "MinMaxScaler",
+        chunk_size      = 10000,
+    )
+
+    result   = scaler_ref.run()
+    zip_path = result["zip"]
+    print(f"[Scaler] Created: {zip_path.name}")
+    return zip_path
 
 # ============================================
 # 🔹 Entry Point
 # ============================================
 if __name__ == "__main__":
+    import yaml
+
+    PROJECT_ROOT   = Path(__file__).resolve().parents[2]
+    RL_CONFIG_PATH = PROJECT_ROOT / "src" / "API" / "config" / "rl_params.yaml"
+
+    if RL_CONFIG_PATH.exists():
+        with open(RL_CONFIG_PATH, "r", encoding="utf-8") as f:
+            rl_cfg = yaml.safe_load(f)
+    else:
+        rl_cfg = {}
+
+    cfg = rl_cfg.get("lstm_csv", {})
+
+    # หรือสร้าง scaler อัตโนมัติ
+    scaler_zip = _get_or_create_scaler(PROJECT_ROOT, cfg)
+
     trainer = TRAIN_MODEL(
-        data_folder=r"D:\Project_end\New_world\my_project\data\raw",
-        scaler_zip=r"D:\Project_end\New_world\my_project\config\Test_scale1_scalers.zip",
-        model_save_path=r"D:\Project_end\New_world\my_project\models\lstm_model.pth",
-        dataset_type="lazy",
-        model_type="DeepLSTM",
-        num_epochs=50,
-        batch_size=8192,
-        hidden_dim=128
+        data_folder     = str(PROJECT_ROOT / cfg.get("data_folder",     "data/raw")),
+        scaler_zip      = str(scaler_zip),     # ← ใช้ path จาก helper
+        model_save_path = str(PROJECT_ROOT / cfg.get("model_save_path", "models/lstm_model.pth")),
+        dataset_type    = cfg.get("dataset_type", "lazy"),
+        model_type      = cfg.get("model_type",   "DeepLSTM"),
+        num_epochs      = cfg.get("num_epochs",   50),
+        batch_size      = cfg.get("batch_size",   8192),
+        hidden_dim      = cfg.get("hidden_dim",   128),
+        num_layers      = cfg.get("num_layers",   2),
+        window_size     = cfg.get("window_size",  30),
+        input_col       = cfg.get("input_col",    "DATA_INPUT"),
+        output_col      = cfg.get("output_col",   "DATA_OUTPUT"),
     )
 
     trainer.prepare_data()
