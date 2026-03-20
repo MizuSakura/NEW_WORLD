@@ -315,24 +315,26 @@ def load_config(yaml_path="experiment.yaml"):
 # MAIN
 # ==========================================================
 if __name__ == "__main__":
+    import yaml
+    from pathlib import Path
 
-    config = load_config("experiment.yaml")
+    _cfg     = yaml.safe_load(
+        (Path(__file__).resolve().parents[3] / "config/hardware.yaml").read_text()
+    )
+    IP_HOST          = _cfg["modbus"]["host"]
+    PORT             = _cfg["modbus"]["port"]
+    ADDRESS_SENSOR   = _cfg["modbus"]["address_sensor"]
+    ADDRESS_ACTUATOR = _cfg["modbus"]["address_actuator"]
+    MIN_ACTION       = _cfg["control"]["min_action"]
+    MAX_ACTION       = _cfg["control"]["max_action"]
+    DELAY_OF_ACTION  = _cfg["control"]["delay_of_action"]
+    DT               = _cfg["control"]["dt"]
+    TIME_SIM         = _cfg["data_collection"]["duration_sec"]
 
-    signal_config = config["signal"]
-    monitoring_config = config.get("monitoring", {})
-
-    IP_HOST = "192.168.1.100"
-    PORT = 502
-    ADDRESS_SENSOR = 1
-    ADDRESS_ACTUATOR = 1025
-
-    MIN_ACTION = 0.0
-    MAX_ACTION = 10.0
-    DELAY_OF_ACTION = 0.2
-
-    TIME_SIM = 60.0
-    DT = 0.1
-
+    signal_config    = _cfg["data_collection"]["signal"]
+    monitoring_config = _cfg["data_collection"]["monitoring"]
+    
+    
     sg = SignalGenerator(t_end=TIME_SIM, dt=DT)
 
     system = response(
