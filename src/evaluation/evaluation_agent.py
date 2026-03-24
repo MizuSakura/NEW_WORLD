@@ -36,11 +36,34 @@ import gymnasium as gym
 # ======================================================
 # Helper
 # ======================================================
+# โฟลเดอร์ rc_models บน server (fallback)
+_RC_MODELS_DIR = Path(r"E:\server_Project\SER_VER_STORE\rc_models")
+
 def _resolve_path(name: str, default_dir: str, root: Path) -> Path:
+    """
+    Resolve model path ตามลำดับ:
+    1. absolute path
+    2. rc_models (server store)
+    3. default_dir ใน project root
+    4. relative to project root
+    """
     p = Path(name)
     if p.suffix == "": p = p.with_suffix(".pt")
-    if p.is_absolute(): return p
-    if len(p.parts) == 1: return root / default_dir / p
+
+    # 1. absolute path
+    if p.is_absolute():
+        return p
+
+    # 2. ชื่อไฟล์อย่างเดียว → ลอง rc_models ก่อน
+    if len(p.parts) == 1:
+        rc = _RC_MODELS_DIR / p
+        if rc.exists(): return rc
+        return root / default_dir / p
+
+    # 3. relative path → ลอง rc_models / filename ก่อน
+    rc = _RC_MODELS_DIR / p.name
+    if rc.exists(): return rc
+
     return root / p
 
 
@@ -99,8 +122,8 @@ def test_agent(env, agent, episodes=10, max_steps=500, deterministic=True):
                 _print_step(ep + 1, step + 1, level, action_val,
                             float(reward), setpoint)
 
-            if done:
-                break
+            # if done:
+            #     break
 
         returns.append(episode_reward)
         trajectories.append({
@@ -268,3 +291,4 @@ if __name__ == "__main__":
         save_plots(trajectories, returns_list, PLOT_FOLDER)
 
     env.close()
+
