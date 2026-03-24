@@ -148,6 +148,7 @@ class Actor(nn.Module):
         log_prob : Tensor (entropy term for SAC loss)
         """
         mean, std = self.forward(state)
+        std = torch.clamp(std, min=1e-6)
         dist = Normal(mean, std)
 
         # Reparameterized sample: x = μ + σ * ε
