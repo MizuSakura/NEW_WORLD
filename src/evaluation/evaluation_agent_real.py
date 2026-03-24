@@ -19,11 +19,26 @@ from src.environment.Apply_real_env import Real_env_remote
 # Helper
 # ======================================================
 def _resolve_path(name: str, root: Path, suffix: str = ".pt") -> Path:
+    """
+    Resolve model path ตามลำดับ:
+    1. absolute path
+    2. rc_models (server store) — ชื่อไฟล์อย่างเดียว
+    3. relative to project root
+    """
+    _RC_MODELS = Path(r"E:\server_Project\SER_VER_STORE\rc_models")
     p = Path(name)
     if p.suffix == "":
         p = p.with_suffix(suffix)
     if p.is_absolute():
         return p
+    # ชื่อไฟล์อย่างเดียว → ลอง rc_models ก่อน
+    if len(p.parts) == 1:
+        rc = _RC_MODELS / p
+        if rc.exists(): return rc
+    else:
+        # relative path → ลอง rc_models/filename ก่อน
+        rc = _RC_MODELS / p.name
+        if rc.exists(): return rc
     return root / p
 
 
