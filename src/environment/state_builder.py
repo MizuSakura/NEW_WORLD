@@ -4,6 +4,25 @@ StateBuilder — Canonical State Builder
 ---------------------------------------
 สร้าง state vector เหมือนกันทุก environment
 ผู้ใช้กำหนด feature ผ่าน rl_params.yaml section state
+
+config format:
+    level_history:    3    # จำนวน history
+    action_history:   3
+    error_history:    0    # 0 = ไม่ใช้
+    setpoint_history: 3
+    integral:         true
+    derivative:       true
+    level_max:        10.0
+
+state order:
+    [level_history..., action_history...,
+     error_history..., setpoint_history...,
+     integral (optional), derivative (optional)]
+
+Bug fix:
+    reset() เดิมเรียก self.get_state() หลัง clear() แต่ก่อน fill buffer
+    ทำให้ _build() return array ว่าง (dim=0) → state mismatch กับ model
+    แก้: ลบ self.get_state() ออก เรียก fill buffer โดยตรง
 """
 
 import numpy as np
@@ -12,23 +31,6 @@ from pathlib import Path
 
 
 class StateBuilder:
-    """
-    สร้าง canonical state จาก config
-
-    config format:
-        level_history:    3    # จำนวน history
-        action_history:   3
-        error_history:    0    # 0 = ไม่ใช้
-        setpoint_history: 3
-        integral:         true
-        derivative:       true
-        level_max:        10.0
-
-    state order:
-        [level_history..., action_history...,
-         error_history..., setpoint_history...,
-         integral (optional), derivative (optional)]
-    """
 
     def __init__(self, cfg: dict):
         self.level_hist_len    = int(cfg.get("level_history",    3))
@@ -53,61 +55,66 @@ class StateBuilder:
         # คำนวณ state_dim
         self.state_dim = self._compute_state_dim()
 
+        # ── pre-fill buffers ด้วยค่า 0 เพื่อให้ state_dim ถูกต้องตั้งแต่แรก
+        self._prefill(level=0.0, action=0.0, setpoint=0.0)
+
     def _compute_state_dim(self) -> int:
-        dim = 0
-        dim += self.level_hist_len
+        dim  = self.level_hist_len
         dim += self.action_hist_len
-        if self.error_hist_len > 0:
-            dim += self.error_hist_len
-        if self.setpoint_hist_len > 0:
-            dim += self.setpoint_hist_len
-        if self.use_integral:
-            dim += 1
-        if self.use_derivative:
-            dim += 1
+        if self.error_hist_len    > 0: dim += self.error_hist_len
+        if self.setpoint_hist_len > 0: dim += self.setpoint_hist_len
+        if self.use_integral:          dim += 1
+        if self.use_derivative:        dim += 1
         return dim
 
-    def reset(self, level: float, action: float, setpoint: float, dt: float = 0.1):
-        """เรียกตอน environment reset"""
-        self._dt         = dt
-        self._integral   = 0.0
-        self._prev_error = 0.0
-
+    def _prefill(self, level: float, action: float, setpoint: float):
+        """Fill buffers เพื่อให้ _build() คืน dim ถูกต้องเสมอ"""
         self._level_buf.clear()
         self._action_buf.clear()
         self._error_buf.clear()
         self._setpoint_buf.clear()
-        self.get_state()
 
-        for _ in range(max(self.level_hist_len, 1)):
+        for _ in range(max(self.level_hist_len,    1)):
             self._level_buf.append(level)
-        for _ in range(max(self.action_hist_len, 1)):
+        for _ in range(max(self.action_hist_len,   1)):
             self._action_buf.append(action)
-        for _ in range(max(self.error_hist_len, 1)):
+        for _ in range(max(self.error_hist_len,    1)):
             self._error_buf.append(0.0)
         for _ in range(max(self.setpoint_hist_len, 1)):
             self._setpoint_buf.append(setpoint)
+
+    def reset(self, level: float, action: float, setpoint: float,
+              dt: float = 0.1):
+        """
+        เรียกตอน environment reset หรือก่อนเริ่ม episode ใหม่
+        Bug fix: ลบ self.get_state() ออก — ไม่มีประโยชน์และทำให้ dim ผิด
+        """
+        self._dt         = dt
+        self._integral   = 0.0
+        self._prev_error = 0.0
+        self._prefill(level=level, action=action, setpoint=setpoint)
 
     def get_state(self) -> np.ndarray:
         """คืน state ปัจจุบันโดยไม่อัปเดต buffer"""
         return self._build()
 
-
-    def update(self, level: float, action: float, setpoint: float) -> np.ndarray:
+    def update(self, level: float, action: float,
+               setpoint: float) -> np.ndarray:
         """
         อัปเดต buffers แล้วคืน state vector
         เรียกทุก step
         """
-        error = setpoint - level
-        error = np.clip(error, -self.level_max, self.level_max)
+        error = float(np.clip(setpoint - level, -self.level_max, self.level_max))
 
         # Integral (anti-windup)
         self._integral += error * self._dt
-        self._integral  = np.clip(self._integral, -self.level_max, self.level_max)
+        self._integral  = float(np.clip(
+            self._integral, -self.level_max, self.level_max))
 
         # Derivative
         derivative = (error - self._prev_error) / self._dt
-        derivative  = np.clip(derivative, -self.level_max, self.level_max)
+        derivative  = float(np.clip(
+            derivative, -self.level_max, self.level_max))
         self._prev_error = error
 
         # Update buffers
@@ -137,17 +144,26 @@ class StateBuilder:
             parts.append(self._integral)
 
         if self.use_derivative:
-            parts.append(self._prev_error)   # derivative ล่าสุด
+            parts.append(self._prev_error)
 
-        return np.array(parts, dtype=np.float32)
+        arr = np.array(parts, dtype=np.float32)
+
+        # Guard: ถ้า dim ไม่ตรงให้ pad/trim
+        if len(arr) != self.state_dim:
+            if len(arr) < self.state_dim:
+                arr = np.pad(arr, (0, self.state_dim - len(arr)))
+            else:
+                arr = arr[:self.state_dim]
+
+        return arr
 
     def obs_bounds(self, action_max: float):
         """คืน low/high สำหรับ observation_space"""
         low, high = [], []
 
         if self.level_hist_len > 0:
-            low  += [0.0]          * self.level_hist_len
-            high += [self.level_max] * self.level_hist_len
+            low  += [0.0]             * self.level_hist_len
+            high += [self.level_max]  * self.level_hist_len
 
         if self.action_hist_len > 0:
             low  += [0.0]        * self.action_hist_len
@@ -158,7 +174,7 @@ class StateBuilder:
             high += [self.level_max]  * self.error_hist_len
 
         if self.setpoint_hist_len > 0:
-            low  += [0.0]          * self.setpoint_hist_len
+            low  += [0.0]            * self.setpoint_hist_len
             high += [self.level_max] * self.setpoint_hist_len
 
         if self.use_integral:
@@ -169,7 +185,8 @@ class StateBuilder:
             low  += [-self.level_max]
             high += [self.level_max]
 
-        return np.array(low, dtype=np.float32), np.array(high, dtype=np.float32)
+        return (np.array(low,  dtype=np.float32),
+                np.array(high, dtype=np.float32))
 
     @classmethod
     def from_yaml(cls, yaml_path: Path) -> "StateBuilder":
@@ -188,4 +205,3 @@ class StateBuilder:
             f"integral={self.use_integral}, "
             f"derivative={self.use_derivative})"
         )
-    
