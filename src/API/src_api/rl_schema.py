@@ -2,6 +2,7 @@
 RL Parameters Schema
 --------------------
 Validate rl_params.yaml
+เพิ่ม num_envs ใน TrainingConfig สำหรับ multi-env mode
 """
 
 from pydantic import BaseModel, Field, validator
@@ -25,6 +26,7 @@ class TrainingConfig(BaseModel):
     final_model_path: str = "models/Test_history.pt"
     env_name: str = "RCTankEnv-v0"
     render_mode: str = "human"
+    num_envs: int = 8       # ← ใหม่: จำนวน parallel env สำหรับ mode multienv
 
 
 # -------------------------------------------------
@@ -44,7 +46,7 @@ class SACConfig(BaseModel):
     learning_rate: float = 3e-4
     gamma: float = 0.99
     tau: float = 0.005
-    alpha: float = 0.4
+    alpha: float = 0.05     # default ใหม่ 0.05 (เดิม 0.4)
     replay_capacity: int = 200000
     buffer_type: str = "nstep_per"
     n_step: int = 3
@@ -61,11 +63,11 @@ class SACConfig(BaseModel):
 class OUNoiseConfig(BaseModel):
     mu: float = 0.0
     theta: float = 0.15
-    sigma: float = 0.25
+    sigma: float = 0.10     # default ใหม่ 0.10 (เดิม 0.25)
     dt: float = 0.1
 
 class GaussianConfig(BaseModel):
-    sigma: float = 0.02
+    sigma: float = 0.01     # default ใหม่ 0.01 (เดิม 0.02)
 
 class SensorNoiseConfig(BaseModel):
     sigma: float = 0.02
@@ -96,8 +98,8 @@ class LoggerConfig(BaseModel):
 
 
 # -------------------------------------------------
-# State  (NEW)
-# รองรับทั้ง int และ str (เพราะ yaml บางครั้ง quote ตัวเลข เช่น '3')
+# State
+# รองรับทั้ง int และ str (yaml บางครั้ง quote ตัวเลข)
 # รองรับ "Ture" typo → True
 # -------------------------------------------------
 
@@ -124,13 +126,11 @@ class StateConfig(BaseModel):
         if isinstance(v, bool):
             return v
         if isinstance(v, str):
-            # รองรับ "Ture" typo และ "true"/"false"
             return v.strip().lower() in ("true", "ture", "1", "yes")
         return bool(v)
 
     @property
     def state_dim(self) -> int:
-        """คำนวณ state_dim จาก config (เหมือน StateBuilder._compute_state_dim)"""
         dim = self.level_history + self.action_history
         if self.error_history > 0:
             dim += self.error_history
@@ -152,7 +152,7 @@ class RLConfig(BaseModel):
     sac:      SACConfig      = SACConfig()
     noise:    NoiseConfig    = NoiseConfig()
     logger:   LoggerConfig   = LoggerConfig()
-    state:    StateConfig    = StateConfig()   # NEW
+    state:    StateConfig    = StateConfig()
 
 
 # -------------------------------------------------
@@ -171,8 +171,9 @@ if __name__ == "__main__":
     print("RLConfig validation success")
     print("Algorithm     :", config.training.algorithm)
     print("Episodes      :", config.training.episodes)
+    print("Num envs      :", config.training.num_envs)
     print("Learning rate :", config.sac.learning_rate)
+    print("Alpha         :", config.sac.alpha)
     print("Buffer type   :", config.sac.buffer_type)
     print("Noise enabled :", config.noise.enabled)
     print("State dim     :", config.state.state_dim)
-    print("State config  :", config.state)
