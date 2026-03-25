@@ -1,11 +1,23 @@
-#hardware\src\utils\logger_hareware.py
+#/home/rl_controller/Desktop/RL_PROJECCT/NEW_WORLD/my_project/hardware/src/utils/logger_hareware.py
+# hardware/src/utils/logger_hareware.py
+"""
+แก้ไขให้ compatible กับ Python 3.6.9, pandas 0.22.0
+
+pandas 0.22.0 ต่างจากเวอร์ชันใหม่:
+    - pd.concat ยังใช้ได้ แต่ ignore_index ใช้ได้แล้ว (มีตั้งแต่ 0.13)
+    - DataFrame.empty ใช้ได้
+    - ระวัง: ไม่มี pd.DataFrame.to_csv mode="a" ใน pandas เก่ามาก
+      (pandas 0.22 มี mode parameter แล้ว OK)
+"""
+
+from __future__ import print_function
 
 import pandas as pd
 from pathlib import Path
 from datetime import datetime
 
 
-class Logger:
+class Logger(object):
     """
     Lightweight logger optimized for embedded devices (e.g., Jetson Nano).
 
@@ -22,11 +34,11 @@ class Logger:
         flush_every : int
             Number of rows before automatic flush to CSV buffer
         """
-        self.buffer = []               # temporary storage (list of dict)
-        self.df = pd.DataFrame()       # optional in-memory view
+        self.buffer      = []
+        self.df          = pd.DataFrame()
         self.flush_every = flush_every
         self.current_path = Path.cwd()
-        self._csv_path = None
+        self._csv_path   = None
 
     # ==========================================================
     # Logging
@@ -68,18 +80,17 @@ class Logger:
             return
 
         new_df = pd.DataFrame(self.buffer)
-        self.buffer.clear()
+        self.buffer = []   # clear (Python 3.6 ใช้ .clear() ได้แต่ reassign ปลอดภัยกว่า)
 
         if self.df.empty:
             self.df = new_df
         else:
             self.df = pd.concat([self.df, new_df], ignore_index=True)
 
-        # Optional: auto-save if path already defined
         if self._csv_path is not None:
             header = not self._csv_path.exists()
-            self.df.to_csv(self._csv_path, mode="a", index=False, header=header)
-            self.df = pd.DataFrame()  # free RAM
+            self.df.to_csv(str(self._csv_path), mode="a", index=False, header=header)
+            self.df = pd.DataFrame()
 
     def save_to_csv(self, file_name, folder_name=None, path_name=None):
         """
@@ -89,20 +100,25 @@ class Logger:
             file_name += ".csv"
 
         base_path = Path(path_name) if path_name else self.current_path
-        folder = base_path / (folder_name or datetime.now().strftime("%Y-%m-%d"))
+        folder_arg = folder_name or datetime.now().strftime("%Y-%m-%d")
+        # folder_name อาจเป็น "" (empty string) → ใช้ base_path ตรงๆ
+        if folder_arg:
+            folder = base_path / folder_arg
+        else:
+            folder = base_path
         folder.mkdir(parents=True, exist_ok=True)
 
         self._csv_path = folder / file_name
         self.flush()
 
-        print(f"Logging to {self._csv_path}")
+        print("Logging to {}".format(self._csv_path))
 
     # ==========================================================
     # Utility
     # ==========================================================
     def clear_data(self):
-        self.buffer.clear()
-        self.df = pd.DataFrame()
+        self.buffer = []
+        self.df     = pd.DataFrame()
         print("Logger cleared")
 
     def show_data(self, tail=5):
@@ -113,3 +129,14 @@ class Logger:
             print(self.df.tail(tail))
         else:
             print("No in-memory data")
+if __name__ == "__main__":
+    # Quick Test
+    logger = Logger(flush_every=5)
+    logger.save_to_csv("test_log.csv", folder_name="test_output")
+    
+    cols = ["step", "val"]
+    for i in range(7):
+        logger.add_data_log(cols, [i, i*10])
+    
+    logger.flush()
+    print("Test finished.")
