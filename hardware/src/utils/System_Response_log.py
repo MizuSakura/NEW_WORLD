@@ -1,3 +1,6 @@
+#/home/rl_controller/Desktop/RL_PROJECCT/NEW_WORLD/my_project/hardware/src/utils/System_Response_log.py
+
+from __future__ import print_function
 from hardware.src.utils.logger_hareware import Logger
 from hardware.src.utils.comucation_modbusTCP_hardware import ModbusTCP
 from hardware.src.environment.signal_generator_hardware import SignalGenerator
@@ -101,13 +104,13 @@ class MonitoringLayer:
         self._last_print = now
 
         msg = (
-            f"[MONITOR] t={t:6.2f}s | "
-            f"action={action:6.2f} | "
-            f"sensor={sensor:6.2f}"
+            "[MONITOR] t={:6.2f}s | ".format(t) +
+            "action={:6.2f} | ".format(action) +
+            "sensor={:6.2f}".format(sensor)
         )
 
         if self.track_error:
-            msg += f" | error={action - sensor:6.2f}"
+            msg += " | error={:6.2f}".format(action - sensor)
 
         print(msg)
 
@@ -224,7 +227,7 @@ class response:
     # Emergency Stop
     # --------------------------------------------------
     def emergency_stop(self, reason):
-        print(f"\n[EMERGENCY STOP] {reason}")
+        print("\n[EMERGENCY STOP] {}".format(reason))
         try:
             self.write_actuator(self.address_actuator, self.safe_action)
         finally:
@@ -275,10 +278,10 @@ class response:
         # ---------- finalize ----------
         signal_type = self.signal_config.get("type", "unknown")
         params = self.signal_config.get("params", {})
-        meta = "_".join(f"{k}_{v}" for k, v in params.items())
+        meta = "_".join(["{}_{}".format(k, v) for k, v in params.items()])
 
-        file_name = f"{self.file_prefix}_{signal_type}_{meta}.csv"
-        self.logger.save_to_csv(file_name, folder_name=self.folder_save_csv)
+        file_name = "{}_{}_{}.csv".format(self.file_prefix, signal_type, meta)
+        self.logger.save_to_csv(file_name, folder_name=str(self.folder_save_csv))
 
 
 # ==========================================================
@@ -303,11 +306,11 @@ DEFAULT_CONFIG = {
 
 def load_config(yaml_path="experiment.yaml"):
     if yaml is None or not Path(yaml_path).exists():
-        print("[INFO] No YAML found → using DEFAULT_CONFIG")
+        print("[INFO] No YAML found -> using DEFAULT_CONFIG")
         return DEFAULT_CONFIG
 
-    with open(yaml_path, "r") as f:
-        print(f"[INFO] Loading config from {yaml_path}")
+    with open(str(yaml_path), "r") as f:
+        print("[INFO] Loading config from {}".format(yaml_path))
         return yaml.safe_load(f)
 
 
@@ -317,10 +320,15 @@ def load_config(yaml_path="experiment.yaml"):
 if __name__ == "__main__":
     import yaml
     from pathlib import Path
+    
+    current_file = Path(__file__).resolve()
+    config_path = current_file.parent.parent.parent / "config" / "hardware.yaml"
+    if not config_path.exists():
+        print("ERROR: Cannot find config at {}".format(config_path))
+    
+    with open(str(config_path), "r") as f:
+        _cfg = yaml.safe_load(f)
 
-    _cfg     = yaml.safe_load(
-        (Path(__file__).resolve().parents[3] / "config/hardware.yaml").read_text()
-    )
     IP_HOST          = _cfg["modbus"]["host"]
     PORT             = _cfg["modbus"]["port"]
     ADDRESS_SENSOR   = _cfg["modbus"]["address_sensor"]
