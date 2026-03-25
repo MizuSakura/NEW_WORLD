@@ -1,0 +1,64 @@
+#/home/rl_controller/Desktop/RL_PROJECCT/NEW_WORLD/my_project/hardware/config/hardware.yaml
+# Source of Truth สำหรับ Jetson side
+
+device:
+  id: "jetson_nvidia01"
+  location: "lab"
+
+mqtt:
+  broker: "100.85.77.73"    # Tailscale IP ของ Laptop
+  port: 1883
+  qos: 1
+  username: "yessuskhonpui"    # ← เพิ่ม
+  password: "246810"
+  client_id: "jetson_nvidia01"
+  keepalive: 60
+  topics:
+    control:   "project/rl/nvidia01/control"
+    state:     "project/rl/nvidia01/state"
+    telemetry: "project/rl/nvidia01/telemetry"
+    emergency: "project/rl/nvidia01/emergency"
+    hardware:  "project/rl/nvidia01/hardware"
+    mode:      "project/rl/nvidia01/mode"
+    action:    "project/rl/nvidia01/action"
+    heartbeat: "project/rl/nvidia01/heartbeat"
+
+modbus:
+  host: "192.168.1.100"
+  port: 502
+  address_sensor:   1
+  address_actuator: 1025
+  min_raw: 0
+  max_raw: 27647
+
+control:
+  min_action:      0.0
+  max_action:      10.0
+  delay_of_action: 0.2
+  dt:              0.1
+  heartbeat_interval: 2.0   # วินาที
+  heartbeat_timeout:  10.0  # วินาที → switch STANDALONE
+
+pid:
+  kp: 2.0
+  ki: 0.1
+  kd: 0.05
+  setpoint:   5.0
+  output_min: 0.0
+  output_max: 10.0
+
+data_collection:
+  save_folder:   "hardware/logs/csv"
+  upload_url:    "http://100.85.77.73:8000/rc/upload-lstm-data"
+  signal:
+    type: "pwm"
+    params:
+      amplitude:  1.0
+      frequency:  0.1
+      duty_cycle: 0.5
+  duration_sec: 60.0
+  log_dt:       0.1
+  monitoring:
+    enabled:        true
+    print_interval: 1.0
+    track_error:    true
