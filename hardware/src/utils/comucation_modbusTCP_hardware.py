@@ -1,20 +1,37 @@
-from pymodbus.client import ModbusTcpClient
+#/home/rl_controller/Desktop/RL_PROJECCT/NEW_WORLD/my_project/hardware/src/utils/comucation_modbusTCP_hardware.py
+# hardware/src/utils/comucation_modbusTCP_hardware.py
+"""
+แก้ไขให้ compatible กับ pymodbus 2.5.3 (Jetson Nano Python 3.6.9)
+
+pymodbus 2.x API ต่างจาก 3.x:
+    Import : from pymodbus.client.sync import ModbusTcpClient
+    Connect: client.connect()  → return True/False
+    Slave  : unit=  (ไม่ใช่ device_id=)
+    Error  : result.isError()  → ยังมีเหมือนเดิม
+"""
+
+from __future__ import print_function
+
+from pymodbus.client.sync import ModbusTcpClient   # pymodbus 2.x
 import time
+
 
 # =====================================================================
 # MODBUS TCP CLASS
 # =====================================================================
-class ModbusTCP:
+class ModbusTCP(object):
     """
     A helper class for communicating with Modbus TCP devices.
     Supports reading/writing coils, inputs, and registers.
     Supports automatic decimal/hex/bin/octal address parsing.
+
+    Compatible: pymodbus 2.5.3
     """
 
     def __init__(self, host='192.168.1.100', port=502):
+        self.host   = host
+        self.port   = port
         self.client = ModbusTcpClient(host=host, port=port)
-        self.host = host
-        self.port = port
 
     # ---------------------------------------------------------
     # UTIL FUNCTIONS
@@ -28,7 +45,7 @@ class ModbusTCP:
             return addr
 
         if not isinstance(addr, str):
-            raise ValueError(f"Unsupported address type: {type(addr)}")
+            raise ValueError("Unsupported address type: {}".format(type(addr)))
 
         s = addr.strip().lower()
 
@@ -46,35 +63,35 @@ class ModbusTCP:
         if all(c in hex_chars for c in s):
             return int(s, 16)
 
-        raise ValueError(f"Cannot auto-detect numeric base from: {addr}")
+        raise ValueError("Cannot auto-detect numeric base from: {}".format(addr))
 
     # ---------------------------------------------------------
     # CONNECTION
     # ---------------------------------------------------------
     def connect(self):
-        self.client.connect()
-        return self.client.connected
+        result = self.client.connect()
+        return result   # True if connected
 
     def disconnect(self):
         self.client.close()
-        return not self.client.connected
+        return True
 
     # ---------------------------------------------------------
     # DIGITAL OUTPUTS (COILS)
     # ---------------------------------------------------------
     def read_status_output(self, address, device_id=1):
         address = self._parse_address(address)
-        resp = self.client.read_coils(address, count=1, device_id=device_id)
-        if resp.isError():
-            print(f"Error reading coil at {address}")
+        resp = self.client.read_coils(address, count=1, unit=device_id)
+        if resp is None or resp.isError():
+            print("Error reading coil at {}".format(address))
             return None
         return resp.bits[0]
 
     def digital_write(self, address, value, device_id=1):
         address = self._parse_address(address)
-        resp = self.client.write_coil(address, value, device_id=device_id)
-        if resp.isError():
-            print(f"Error writing coil at {address}")
+        resp = self.client.write_coil(address, value, unit=device_id)
+        if resp is None or resp.isError():
+            print("Error writing coil at {}".format(address))
             return None
         return True
 
@@ -83,9 +100,9 @@ class ModbusTCP:
     # ---------------------------------------------------------
     def digital_input(self, address, count=1, device_id=1):
         address = self._parse_address(address)
-        resp = self.client.read_discrete_inputs(address, count=count, device_id=device_id)
-        if resp.isError():
-            print(f"Error reading input at {address}")
+        resp = self.client.read_discrete_inputs(address, count=count, unit=device_id)
+        if resp is None or resp.isError():
+            print("Error reading input at {}".format(address))
             return None
         return resp.bits[0] if count == 1 else resp.bits
 
@@ -94,9 +111,9 @@ class ModbusTCP:
     # ---------------------------------------------------------
     def analog_read(self, address, count=1, device_id=1):
         address = self._parse_address(address)
-        resp = self.client.read_input_registers(address, count=count, device_id=device_id)
-        if resp.isError():
-            print(f"Error reading analog input at {address}")
+        resp = self.client.read_input_registers(address, count=count, unit=device_id)
+        if resp is None or resp.isError():
+            print("Error reading analog input at {}".format(address))
             return None
         return resp.registers[0] if count == 1 else resp.registers
 
@@ -105,17 +122,17 @@ class ModbusTCP:
     # ---------------------------------------------------------
     def read_holding_registers(self, address, count=1, device_id=1):
         address = self._parse_address(address)
-        resp = self.client.read_holding_registers(address, count=count, device_id=device_id)
-        if resp.isError():
-            print(f"Error reading HR at {address}")
+        resp = self.client.read_holding_registers(address, count=count, unit=device_id)
+        if resp is None or resp.isError():
+            print("Error reading HR at {}".format(address))
             return None
         return resp.registers
 
     def write_holding_register(self, address, value, device_id=1):
         address = self._parse_address(address)
-        resp = self.client.write_register(address, value, device_id=device_id)
-        if resp.isError():
-            print(f"Error writing HR at {address}")
+        resp = self.client.write_register(address, value, unit=device_id)
+        if resp is None or resp.isError():
+            print("Error writing HR at {}".format(address))
             return None
         return True
 
@@ -128,18 +145,16 @@ def test_coil_output(modbus, start_hex, end_hex, delay=0.2):
     s = int(start_hex, 16)
     e = int(end_hex, 16)
 
-    # Turn ON coils
     for addr in range(s, e + 1):
         modbus.digital_write(addr, 1)
         v = modbus.read_status_output(addr)
-        print(f"COIL ON  : {addr} ({hex(addr)}) = {v}")
+        print("COIL ON  : {} ({}) = {}".format(addr, hex(addr), v))
         time.sleep(delay)
 
-    # Turn OFF coils
     for addr in range(s, e + 1):
         modbus.digital_write(addr, 0)
         v = modbus.read_status_output(addr)
-        print(f"COIL OFF : {addr} ({hex(addr)}) = {v}")
+        print("COIL OFF : {} ({}) = {}".format(addr, hex(addr), v))
         time.sleep(delay)
 
 
@@ -150,7 +165,7 @@ def test_input_status(modbus, start_hex, end_hex, delay=0.2):
 
     for addr in range(s, e + 1):
         v = modbus.digital_input(addr)
-        print(f"INPUT : {addr} ({hex(addr)}) = {v}")
+        print("INPUT : {} ({}) = {}".format(addr, hex(addr), v))
         time.sleep(delay)
 
 
@@ -158,13 +173,13 @@ def test_write_register(modbus, address, value=0):
     print("\n=== TEST: Write Holding Register ===")
     dec_addr = int(address)
     ok = modbus.write_holding_register(dec_addr, value)
-    print(f"WRITE HR[{dec_addr}] = {value}, STATUS={ok}")
+    print("WRITE HR[{}] = {}, STATUS={}".format(dec_addr, value, ok))
 
 
 # =====================================================================
 # TEST MANAGER (OOP)
 # =====================================================================
-class TestManager:
+class TestManager(object):
     """
     OOP-based manager for Modbus tests.
     Safely executes registered test functions.
@@ -173,58 +188,45 @@ class TestManager:
 
     def __init__(self, modbus):
         self.modbus = modbus
-        self.tests = {}
+        self.tests  = {}
 
-    # --------------------------
-    # Register test
-    # --------------------------
     def register(self, name, func, args=(), kwargs=None):
         self.tests[name] = {
-            "func": func,
-            "args": args,
+            "func":   func,
+            "args":   args,
             "kwargs": kwargs or {}
         }
 
-    # --------------------------
-    # Run test
-    # --------------------------
     def run(self, name):
         if name not in self.tests:
-            raise ValueError(f"Unknown test name: {name}")
+            raise ValueError("Unknown test name: {}".format(name))
 
         f = self.tests[name]
-
-        print(f"\n=== RUN TEST: {name} ===")
+        print("\n=== RUN TEST: {} ===".format(name))
 
         try:
             return f["func"](self.modbus, *f["args"], **f["kwargs"])
-
         except Exception as e:
-            print(f"[ERROR] Test '{name}' failed:", e)
+            print("[ERROR] Test '{}' failed: {}".format(name, e))
             self.emergency_shutdown()
             return None
 
-    # --------------------------
-    # Emergency Shutdown
-    # --------------------------
     def emergency_shutdown(self, coil_range=("0x4000", "0x40FF"), reg_range=(0, 200)):
         print("\n*** EMERGENCY SHUTDOWN ACTIVATED ***")
 
-        # OFF all coils
         start = int(coil_range[0], 16)
-        end = int(coil_range[1], 16)
+        end   = int(coil_range[1], 16)
         for addr in range(start, end + 1):
             try:
                 self.modbus.digital_write(addr, 0)
-            except:
+            except Exception:
                 pass
 
-        # Reset Registers
         r_start, r_end = reg_range
         for addr in range(r_start, r_end + 1):
             try:
                 self.modbus.write_holding_register(addr, 0)
-            except:
+            except Exception:
                 pass
 
         print("All coils and holding registers reset to 0.")
@@ -235,41 +237,23 @@ class TestManager:
 # =====================================================================
 if __name__ == "__main__":
 
-    modbus = ModbusTCP(host="192.168.1.100")
+    modbus  = ModbusTCP(host="192.168.1.100")
     manager = TestManager(modbus)
 
-    # Register available tests
-    manager.register(
-        "coil_output",
-        test_coil_output,
-        args=("0x4000", "0x400F")
-    )
+    manager.register("coil_output",   test_coil_output,   args=("0x4000", "0x400F"))
+    manager.register("input_status",  test_input_status,  args=("0x0000", "0x000F"))
+    manager.register("write_register",test_write_register, args=("1025",), kwargs={"value": 0})
 
-    manager.register(
-        "input_status",
-        test_input_status,
-        args=("0x0000", "0x000F")
-    )
-
-    manager.register(
-        "write_register",
-        test_write_register,
-        args=("1025",),
-        kwargs={"value": 0}
-    )
-
-    # RUN
     try:
         if not modbus.connect():
             raise ConnectionError("Cannot connect to Modbus device.")
 
         print("\n===== AVAILABLE TESTS =====")
         for i, name in enumerate(manager.tests.keys(), 1):
-            print(f"{i}) {name}")
+            print("{}) {}".format(i, name))
 
-        choice = int(input("Select test number: "))
+        choice    = int(input("Select test number: "))
         test_name = list(manager.tests.keys())[choice - 1]
-
         manager.run(test_name)
 
     except Exception as e:
@@ -279,3 +263,4 @@ if __name__ == "__main__":
     finally:
         modbus.disconnect()
         print("Modbus connection closed.")
+
