@@ -1,4 +1,4 @@
-# hardware/src/jetson_agent.py
+#/home/rl_controller/Desktop/RL_PROJECCT/NEW_WORLD/my_project/hardware/src/agent/jetson_agent.py
 """
 Jetson Agent
 ------------
@@ -10,21 +10,20 @@ Mode:
     STANDALONE    — คำนวณ PID เอง (fallback เมื่อ network ล่ม)
     MANUAL        — หยุดส่ง action (คนควบคุมเอง)
 
-Reuse ไฟล์เดิม:
-    ModbusTCP     ← comucation_modbusTCP_hardware.py
-    get_hw_config ← hw_config_loader.py
-    SafetyLayer   ← data_collector.py
-    Watchdog      ← data_collector.py
-
-MQTT Topics:
-    subscribe: action, mode, emergency
-    publish:   state, heartbeat, telemetry
+แก้ไขให้ compatible กับ:
+    Python   3.6.9
+    paho-mqtt 1.6.1   (ไม่มี CallbackAPIVersion)
+    numpy    1.13.3   (ไม่มี keyword-only clip บางอย่าง แต่ clip ปกติใช้ได้)
+    pymodbus 2.5.3    (ดู comucation_modbusTCP_hardware.py)
+    PyYAML   3.12
 
 วิธีรัน:
-    python -m hardware.src.jetson_agent
-    python -m hardware.src.jetson_agent --mode STANDALONE
-    python -m hardware.src.jetson_agent --dry-run
+    python -m hardware.src.agent.jetson_agent
+    python -m hardware.src.agent.jetson_agent --mode STANDALONE
+    python -m hardware.src.agent.jetson_agent --dry-run
 """
+
+from __future__ import print_function
 
 import argparse
 import json
@@ -48,7 +47,7 @@ from hardware.src.data.data_collector import SafetyLayer, Watchdog
 # ======================================================================
 # PID Controller (standalone fallback)
 # ======================================================================
-class PIDController:
+class PIDController(object):
 
     def __init__(self, kp, ki, kd, setpoint,
                  output_min, output_max, sample_time=0.1):
@@ -66,7 +65,8 @@ class PIDController:
         self._integral   = 0.0
         self._prev_error = 0.0
 
-    def compute(self, measurement: float) -> float:
+    def compute(self, measurement):
+        # type: (float) -> float
         error            = self.sp - measurement
         self._integral  += error * self.dt
         self._integral   = float(np.clip(self._integral, self.mn, self.mx))
@@ -81,12 +81,11 @@ class PIDController:
 # ======================================================================
 # Jetson Agent
 # ======================================================================
-class JetsonAgent:
+class JetsonAgent(object):
 
     MODES = ("MQTT_CONTROL", "STANDALONE", "MANUAL")
 
-    def __init__(self, initial_mode: str = "MQTT_CONTROL",
-                 dry_run: bool = False):
+    def __init__(self, initial_mode="MQTT_CONTROL", dry_run=False):
 
         # ── Load config ───────────────────────────────────────────
         self.cfg  = get_hw_config()
@@ -167,11 +166,8 @@ class JetsonAgent:
             sample_time = self._dt,
         )
 
-        # ── MQTT client ───────────────────────────────────────────
-        self._client = mqtt.Client(
-            mqtt.CallbackAPIVersion.VERSION2,
-            client_id=self._device_id
-        )
+        # ── MQTT client (paho-mqtt 1.6.1 — ไม่มี CallbackAPIVersion) ──
+        self._client = mqtt.Client(client_id=self._device_id)
         username = mqtt_cfg.get("username", "")
         password = mqtt_cfg.get("password", "")
         if username:
@@ -186,17 +182,17 @@ class JetsonAgent:
     # ──────────────────────────────────────────────────────────────
 
     def start(self):
-        print(f"[JetsonAgent] Connecting Modbus → {self.cfg['modbus']['host']}")
+        print("[JetsonAgent] Connecting Modbus → {}".format(self.cfg['modbus']['host']))
         if not self._modbus.connect():
             raise ConnectionError("Cannot connect to Modbus hardware")
         print("[JetsonAgent] Modbus connected")
 
-        print(f"[JetsonAgent] Connecting MQTT → {self._broker}:{self._port}")
+        print("[JetsonAgent] Connecting MQTT → {}:{}".format(self._broker, self._port))
         self._client.connect(self._broker, self._port, keepalive=60)
         self._client.loop_start()
 
         self._running = True
-        print(f"[JetsonAgent] Running — mode: {self._mode}")
+        print("[JetsonAgent] Running — mode: {}".format(self._mode))
         self._control_loop()
 
     def stop(self):
@@ -208,10 +204,12 @@ class JetsonAgent:
         print("[JetsonAgent] Stopped")
 
     @property
-    def mode(self) -> str:
+    def mode(self):
+        # type: () -> str
         return self._mode
 
-    def status(self) -> dict:
+    def status(self):
+        # type: () -> dict
         return {
             "mode":      self._mode,
             "running":   self._running,
@@ -270,7 +268,7 @@ class JetsonAgent:
             try:
                 self._safety.check_sensor(level)
             except RuntimeError as e:
-                print(f"[JetsonAgent] Safety violation: {e}")
+                print("[JetsonAgent] Safety violation: {}".format(e))
                 self._trigger_emergency()
                 continue
 
@@ -287,10 +285,10 @@ class JetsonAgent:
             # 8. Print status ทุก 10 steps
             if self._step % 10 == 0:
                 print(
-                    f"[{self._mode}] "
-                    f"LV:{level:.3f} SP:{self._setpoint:.3f} "
-                    f"ACT:{action:.3f} ERR:{error:.3f} "
-                    f"STEP:{self._step}",
+                    "[{}] LV:{:.3f} SP:{:.3f} ACT:{:.3f} ERR:{:.3f} STEP:{}".format(
+                        self._mode, level, self._setpoint,
+                        action, error, self._step
+                    ),
                     flush=True
                 )
 
@@ -302,7 +300,8 @@ class JetsonAgent:
     # Action: MQTT_CONTROL
     # ──────────────────────────────────────────────────────────────
 
-    def _get_action_mqtt(self, level: float) -> float:
+    def _get_action_mqtt(self, level):
+        # type: (float) -> float
         """ส่ง state ไป Laptop → ใช้ action ล่าสุด / fallback PID"""
         # publish state
         self._publish(self._topics["state"], {
@@ -319,16 +318,17 @@ class JetsonAgent:
 
         age = time.time() - self._last_action_ts
         if age > self._action_timeout:
-            print(f"[JetsonAgent] Action timeout ({age:.1f}s) → PID")
+            print("[JetsonAgent] Action timeout ({:.1f}s) → PID".format(age))
             return self._pid.compute(level)
 
         return self._last_action
 
     # ──────────────────────────────────────────────────────────────
-    # Modbus IO  (reuse ModbusTCP จาก comucation_modbusTCP_hardware)
+    # Modbus IO
     # ──────────────────────────────────────────────────────────────
 
-    def _read_sensor(self) -> float | None:
+    def _read_sensor(self):
+        # type: () -> float or None   (Optional[float] ใช้ไม่ได้ใน 3.6 type comment)
         """analog_read → scale เป็น engineering unit"""
         try:
             raw = self._modbus.analog_read(address=self._addr_sensor)
@@ -340,10 +340,11 @@ class JetsonAgent:
                 [self._min_action, self._max_action]
             ))
         except Exception as e:
-            print(f"[JetsonAgent] Sensor error: {e}")
+            print("[JetsonAgent] Sensor error: {}".format(e))
             return None
 
-    def _write_actuator(self, action: float):
+    def _write_actuator(self, action):
+        # type: (float) -> None
         """scale action → raw → write_holding_register"""
         try:
             raw = int(np.interp(
@@ -354,7 +355,7 @@ class JetsonAgent:
             self._modbus.write_holding_register(
                 address=self._addr_actuator, value=raw)
         except Exception as e:
-            print(f"[JetsonAgent] Actuator error: {e}")
+            print("[JetsonAgent] Actuator error: {}".format(e))
 
     def _safe_shutdown(self):
         """ส่ง 0 ไป actuator"""
@@ -363,12 +364,11 @@ class JetsonAgent:
                 address=self._addr_actuator, value=0)
             print("[JetsonAgent] Actuator set to 0")
         except Exception as e:
-            print(f"[JetsonAgent] Safe shutdown error: {e}")
+            print("[JetsonAgent] Safe shutdown error: {}".format(e))
 
     def _emergency_shutdown(self):
         """ปิด coils ทั้งหมด + reset actuator"""
         print("[JetsonAgent] *** EMERGENCY SHUTDOWN ***")
-        # coil range จาก hardware.yaml (ถ้ามี)
         ctrl = self.cfg.get("control", {})
         c_start = ctrl.get("emergency_coil_start", "0x4000")
         c_end   = ctrl.get("emergency_coil_end",   "0x40FF")
@@ -381,7 +381,7 @@ class JetsonAgent:
                 except Exception:
                     pass
         except Exception as ex:
-            print(f"[JetsonAgent] Coil shutdown error: {ex}")
+            print("[JetsonAgent] Coil shutdown error: {}".format(ex))
         self._safe_shutdown()
 
     def _trigger_emergency(self):
@@ -389,7 +389,7 @@ class JetsonAgent:
         self._emergency_shutdown()
 
     # ──────────────────────────────────────────────────────────────
-    # MQTT Callbacks
+    # MQTT Callbacks  (paho-mqtt 1.6.1 signature)
     # ──────────────────────────────────────────────────────────────
 
     def _on_connect(self, client, userdata, flags, rc):
@@ -399,10 +399,10 @@ class JetsonAgent:
             client.subscribe(self._topics["emergency"], 2)
             print("[JetsonAgent] MQTT connected — subscribed: action, mode, emergency")
         else:
-            print(f"[JetsonAgent] MQTT connect failed rc={rc}")
+            print("[JetsonAgent] MQTT connect failed rc={}".format(rc))
 
     def _on_disconnect(self, client, userdata, rc):
-        print(f"[JetsonAgent] MQTT disconnected rc={rc}")
+        print("[JetsonAgent] MQTT disconnected rc={}".format(rc))
         if self._mode == "MQTT_CONTROL":
             print("[JetsonAgent] Network lost → STANDALONE fallback")
             self._mode = "STANDALONE"
@@ -424,7 +424,8 @@ class JetsonAgent:
     # Message Handlers
     # ──────────────────────────────────────────────────────────────
 
-    def _handle_action(self, data: dict):
+    def _handle_action(self, data):
+        # type: (dict) -> None
         action = float(np.clip(
             float(data.get("action", self._last_action)),
             self._min_action, self._max_action
@@ -432,24 +433,25 @@ class JetsonAgent:
         self._last_action    = action
         self._last_action_ts = time.time()
 
-        # detect new episode
         ep = int(data.get("episode", self._episode))
         if ep != self._episode:
             self._episode    = ep
             self._cum_reward = 0.0
             self._pid.reset()
 
-    def _handle_mode(self, data: dict):
+    def _handle_mode(self, data):
+        # type: (dict) -> None
         mode = str(data.get("mode", self._mode)).upper()
         if mode in self.MODES:
-            print(f"[JetsonAgent] Mode: {self._mode} → {mode}")
+            print("[JetsonAgent] Mode: {} → {}".format(self._mode, mode))
             self._mode = mode
             if mode == "STANDALONE":
                 self._pid.reset()
         else:
-            print(f"[JetsonAgent] Unknown mode: {mode}")
+            print("[JetsonAgent] Unknown mode: {}".format(mode))
 
-    def _handle_emergency(self, data: dict):
+    def _handle_emergency(self, data):
+        # type: (dict) -> None
         cmd = str(data.get("command", ""))
         if cmd == "EMERGENCY_STOP":
             self._trigger_emergency()
@@ -482,7 +484,8 @@ class JetsonAgent:
             "ts":         datetime.now().isoformat(),
         })
 
-    def _publish(self, topic: str, payload: dict):
+    def _publish(self, topic, payload):
+        # type: (str, dict) -> None
         try:
             self._client.publish(
                 topic,
@@ -490,18 +493,19 @@ class JetsonAgent:
                 qos=self._qos
             )
         except Exception as e:
-            print(f"[JetsonAgent] Publish error: {e}")
+            print("[JetsonAgent] Publish error: {}".format(e))
 
     # ──────────────────────────────────────────────────────────────
     # Helpers
     # ──────────────────────────────────────────────────────────────
 
     @staticmethod
-    def _parse_payload(payload: str) -> dict | None:
+    def _parse_payload(payload):
+        # type: (str) -> dict or None
         """Parse JSON — รองรับ unquoted keys {level:3.5,...}"""
         try:
             return json.loads(payload)
-        except json.JSONDecodeError:
+        except ValueError:
             try:
                 data  = {}
                 clean = payload.strip('{}')
@@ -517,7 +521,7 @@ class JetsonAgent:
                         data[k] = v
                 return data if data else None
             except Exception:
-                print(f"[JetsonAgent] Invalid payload: {payload}")
+                print("[JetsonAgent] Invalid payload: {}".format(payload))
                 return None
 
 
@@ -543,8 +547,8 @@ def main():
 
     print("=" * 55)
     print("[JetsonAgent] RC Tank Control Agent")
-    print(f"[JetsonAgent] Mode    : {args.mode}")
-    print(f"[JetsonAgent] Dry run : {args.dry_run}")
+    print("[JetsonAgent] Mode    : {}".format(args.mode))
+    print("[JetsonAgent] Dry run : {}".format(args.dry_run))
     print("=" * 55)
 
     agent = JetsonAgent(
@@ -557,7 +561,7 @@ def main():
     except KeyboardInterrupt:
         print("\n[JetsonAgent] Interrupted")
     except Exception as e:
-        print(f"[JetsonAgent] Fatal: {e}")
+        print("[JetsonAgent] Fatal: {}".format(e))
     finally:
         agent.stop()
 
